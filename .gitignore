@@ -6,3 +6,8 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+__pycache__/
+venv/
+*.pyc
+data
+lists
