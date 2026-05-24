@@ -269,8 +269,7 @@ def build_global_dataset(feature_cube, mask):
 
 def subsample_dataset(X, y, max_samples=MAX_PIXELS_TOTAL, seed=RANDOM_SEED):
     """
-    Ограничивает размер выборки для ускорения kNN и Cross-Validation.
-    Стратифицирует по классам, чтобы сохранить пропорции.
+    Случайное ограничение размера выборки для ускорения kNN и Cross-Validation.
     """
     if len(X) <= max_samples:
         return X, y
@@ -286,7 +285,7 @@ def rebuild_feature_cube(X, y):
     выборки — для совместимости с функциями визуализации, ожидающими 3D-массив.
     """
     n, c = X.shape
-    dataset = X.reshape(n, 1, c)
+    dataset = X[:, np.newaxis, :]
     mask    = y.reshape(n, 1)
     return dataset, mask
 
@@ -899,111 +898,6 @@ def plot_boxplot_by_class(dataset, mask, names, out_dir, max_cls=6):
     print(f"  ✅ Рисунок 9: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- [10]
-def plot_comparison_table(names, sel_bhatta, hist_bhatta,
-                           sel_ml, hist_ml, out_dir):
-    """
-    Рисунок 10. Сравнительная таблица методов отбора признаков.
-
-    Итоговый рисунок курсовой: сопоставляет результаты статистического
-    (Бхаттачарья) и ML (kNN) методов — какие признаки отобраны каждым,
-    их ранг, накопленный критерий и признаки-«победители» обоих методов.
-    """
-    n_bhatta = len(sel_bhatta)
-    n_ml     = len(sel_ml)
-    n_rows   = max(n_bhatta, n_ml, 1)
-
-    common = set(names[i] for i in sel_bhatta) & set(names[i] for i in sel_ml)
-
-    fig = plt.figure(figsize=(14, 2.2 + n_rows * 0.55))
-    gs  = fig.add_gridspec(1, 3, wspace=0.08,
-                           left=0.03, right=0.97, top=0.82, bottom=0.08)
-
-    # --- Левая таблица: Бхаттачарья ---
-    ax_b = fig.add_subplot(gs[0])
-    ax_b.axis('off')
-    rows_b = [['Ранг', 'Признак', 'D_B накопл.']]
-    for rank, idx in enumerate(sel_bhatta, 1):
-        d   = f'{hist_bhatta[rank-1]:.3f}' if rank-1 < len(hist_bhatta) else '—'
-        nm  = names[idx]
-        rows_b.append([str(rank), nm, d])
-    if not sel_bhatta:
-        rows_b.append(['—', 'нет данных', '—'])
-
-    t_b = ax_b.table(cellText=rows_b[1:], colLabels=rows_b[0],
-                     cellLoc='center', loc='center')
-    t_b.auto_set_font_size(False); t_b.set_fontsize(9)
-    t_b.scale(1, 1.4)
-    # Заголовок столбцов
-    for j in range(3):
-        t_b[(0,j)].set_facecolor('#E63946')
-        t_b[(0,j)].set_text_props(color='white', fontweight='bold')
-    # Подсветка общих
-    for rank, idx in enumerate(sel_bhatta, 1):
-        if names[idx] in common:
-            for j in range(3):
-                t_b[(rank, j)].set_facecolor('#FFE8A1')
-    ax_b.set_title('Метод 1: Бхаттачарья\n(статистический)', fontsize=10,
-                   fontweight='bold', color='#E63946', pad=6)
-
-    # --- Средняя таблица: пересечение ---
-    ax_c = fig.add_subplot(gs[1])
-    ax_c.axis('off')
-    rows_c = [['Общие признаки', 'Бхаттачарья ранг', 'kNN ранг']]
-    for nm in sorted(common):
-        rb = next((r+1 for r,i in enumerate(sel_bhatta) if names[i]==nm), '—')
-        rm = next((r+1 for r,i in enumerate(sel_ml)     if names[i]==nm), '—')
-        rows_c.append([nm, str(rb), str(rm)])
-    if not common:
-        rows_c.append(['нет пересечений', '—', '—'])
-
-    t_c = ax_c.table(cellText=rows_c[1:], colLabels=rows_c[0],
-                     cellLoc='center', loc='center')
-    t_c.auto_set_font_size(False); t_c.set_fontsize(9)
-    t_c.scale(1, 1.4)
-    for j in range(3):
-        t_c[(0,j)].set_facecolor('#2A9D8F')
-        t_c[(0,j)].set_text_props(color='white', fontweight='bold')
-    for r in range(1, len(rows_c)):
-        for j in range(3):
-            t_c[(r,j)].set_facecolor('#D4F1EE')
-    ax_c.set_title('Совпадение методов\n(★ лучшие признаки)', fontsize=10,
-                   fontweight='bold', color='#2A9D8F', pad=6)
-
-    # --- Правая таблица: kNN ---
-    ax_m = fig.add_subplot(gs[2])
-    ax_m.axis('off')
-    rows_m = [['Ранг', 'Признак', 'Accuracy %']]
-    for rank, idx in enumerate(sel_ml, 1):
-        a   = f'{hist_ml[rank-1]*100:.1f}%' if rank-1 < len(hist_ml) else '—'
-        nm  = names[idx]
-        rows_m.append([str(rank), nm, a])
-    if not sel_ml:
-        rows_m.append(['—', 'нет данных', '—'])
-
-    t_m = ax_m.table(cellText=rows_m[1:], colLabels=rows_m[0],
-                     cellLoc='center', loc='center')
-    t_m.auto_set_font_size(False); t_m.set_fontsize(9)
-    t_m.scale(1, 1.4)
-    for j in range(3):
-        t_m[(0,j)].set_facecolor('#3A86FF')
-        t_m[(0,j)].set_text_props(color='white', fontweight='bold')
-    for rank, idx in enumerate(sel_ml, 1):
-        if names[idx] in common:
-            for j in range(3):
-                t_m[(rank, j)].set_facecolor('#FFE8A1')
-    ax_m.set_title('Метод 2: kNN (5-fold CV)\n(ML-критерий)', fontsize=10,
-                   fontweight='bold', color='#3A86FF', pad=6)
-
-    fig.suptitle(
-        'Рисунок 10. Сравнительная таблица результатов отбора признаков\n'
-        '(выделены жёлтым: признаки, отобранные обоими методами)',
-        fontsize=13, fontweight='bold', y=0.97)
-
-    path = os.path.join(out_dir, 'graph_10_comparison_table.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 10: {os.path.basename(path)}")
-
 # ===========================================================================
 # ЧАСТЬ 8: ГЛАВНЫЙ ПАЙПЛАЙН
 # ===========================================================================
@@ -1018,7 +912,7 @@ def main():
       5. Статистический анализ (Махаланобис + Бхаттачарья)
       6. Forward Selection — Бхаттачарья (пара классов 2↔11)
       7. Forward Selection — kNN 5-fold CV (все классы)
-      8. Построение 10 рисунков
+      8. Построение 9 рисунков (graph_01 – graph_09)
       9. Итоговый отчёт в консоль
     """
     print("=" * 70)
@@ -1252,7 +1146,7 @@ def main():
     plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=clsp)
     plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=clsp)
     plot_boxplot_by_class(dataset, mask, names, out_dir)
-    plot_comparison_table(names, sel_b, hist_b, sel_m, hist_m, out_dir)
+    # (graph_10 — сравнительная таблица строится отдельно в анализе результатов)
 
     # -------------------------------------------------------------------
     # ИТОГОВЫЙ ОТЧЁТ
