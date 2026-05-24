@@ -6,23 +6,23 @@ combined_module.py
 космических изображений (на примере датасета MultiSenGE)»
 
 Объединённый модуль включает:
-  1. fast_features.py  — вычисление признакового пространства
-  2. loader.py         — загрузка данных Sentinel-2
-  3. evaluate_features.py — анализ классов: расстояния Махаланобиса и Бхаттачарьи
-  4. forward_selection_stats.py — статистический Forward Selection (Бхаттачарья)
-  5. forward_selection_ml.py   — ML Forward Selection (kNN + 5-fold CV)
+  1. fast_features.py          — признаковое пространство (текстура + спектр)
+  2. loader.py                 — загрузка данных Sentinel-2
+  3. evaluate_features.py      — расстояния Махаланобиса и Бхаттачарьи
+  4. forward_selection_stats.py — Forward Selection по критерию Бхаттачарьи
+  5. forward_selection_ml.py   — Forward Selection по точности kNN (5-fold CV)
 
-Графики (минимум 8):
-  [1]  Матрица корреляций признаков
-  [2]  Распределение яркостей классов по признаку Original / Mean
-  [3]  Тепловая карта попарных расстояний Бхаттачарьи
-  [4]  Тепловая карта попарных расстояний Махаланобиса
-  [5]  Кривая Forward Selection (статистический — Бхаттачарья)
-  [6]  Кривая Forward Selection (ML — kNN Accuracy)
-  [7]  Совместное распределение двух классов (KDE-эллипсоиды)
-  [8]  Гистограммы ключевых признаков для двух классов
-  [9]  Нормализованное признаковое пространство (boxplot по классам)
-  [10] Карта отобранных признаков на снимке (псевдоцветная визуализация)
+Итоговые 10 рисунков (курсовая работа):
+  [1]  graph_01 — Матрица корреляций Пирсона признакового пространства
+  [2]  graph_02 — KDE-гистограммы распределений признаков по классам
+  [3]  graph_03 — Тепловая карта попарных расстояний Бхаттачарьи
+  [4]  graph_04 — Тепловая карта попарных расстояний Махаланобиса
+  [5]  graph_05 — Кривая Forward Selection (критерий Бхаттачарьи)
+  [6]  graph_06 — Кривая Forward Selection (kNN Accuracy, 5-fold CV)
+  [7]  graph_07 — KDE-эллипсоиды рассеяния двух классов (Mean vs Rho_Avg)
+  [8]  graph_08 — Гистограммы всех признаков для пары классов
+  [9]  graph_09 — Box-plot нормализованных признаков по всем классам
+  [10] graph_10 — Сравнительная таблица методов (comparison_table)
 =============================================================================
 """
 
@@ -30,227 +30,34 @@ combined_module.py
 # Импорты
 # ---------------------------------------------------------------------------
 import os
-import sys
+import random
 import warnings
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')          # безголовый режим, убрать если нужен GUI
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import seaborn as sns
-
 from scipy.ndimage import uniform_filter
 
-# Опциональные зависимости (геопространственные данные)
 try:
     import rasterio
     from scipy.ndimage import zoom
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
-    print("⚠️  rasterio не установлен — модуль запустится в демо-режиме с синтетическими данными.")
+    print("⚠️  rasterio не установлен — запуск в демо-режиме (синтетические данные).")
 
-# Машинное обучение
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 
 # ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 1: ВЫЧИСЛЕНИЕ ПРИЗНАКОВ (fast_features.py)
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-def get_fast_stats(image: np.ndarray, window_size: int):
-    """
-    Вычисляет локальное среднее, дисперсию и СКО за O(1) на пиксель.
-
-    Использует интегральные изображения через uniform_filter, что
-    позволяет обрабатывать снимки любого размера без «скользящего окна».
-
-    Parameters
-    ----------
-    image       : (H, W) float-массив
-    window_size : размер квадратного окна (нечётный, например 15)
-
-    Returns
-    -------
-    mean, var, std : каждый (H, W) float64
-    """
-    n = window_size
-    img64 = image.astype(np.float64)
-    mean   = uniform_filter(img64,    size=n, mode='mirror')
-    sq_mean = uniform_filter(img64**2, size=n, mode='mirror')
-    var = np.maximum(sq_mean - mean**2, 0.0)
-    std = np.sqrt(var)
-    return mean, var, std
-
-
-def calc_directional_rho(image: np.ndarray, mean: np.ndarray,
-                          var: np.ndarray, window_size: int) -> dict:
-    """
-    Направленные коэффициенты корреляции по 4 направлениям:
-    0° (→), 90° (↓), 45° (↘), 135° (↙).
-
-    Рассчитывается как нормированная локальная ковариация пикселя
-    с его ближайшим соседом в каждом из направлений.
-
-    Parameters
-    ----------
-    image, mean, var : (H, W) массивы
-    window_size      : размер окна усреднения
-
-    Returns
-    -------
-    rhos : dict с ключами '0', '90', '45', '135' → (H, W) в [-1, 1]
-    """
-    directions = {'0': (0, 1), '90': (1, 0), '45': (1, 1), '135': (1, -1)}
-    rhos = {}
-    eps = 1e-10
-    for angle, (dy, dx) in directions.items():
-        shifted  = np.roll(np.roll(image, -dy, axis=0), -dx, axis=1)
-        f_adj    = uniform_filter(image * shifted, size=window_size, mode='mirror')
-        rho      = (f_adj - mean**2) / (var + eps)
-        rhos[angle] = np.clip(rho, -1.0, 1.0)
-    return rhos
-
-
-def compute_spectral_indices(img_10ch: np.ndarray) -> dict:
-    """
-    Вычисляет спектральные вегетационные и городские индексы
-    для 10-канального снимка Sentinel-2.
-
-    Порядок каналов: B2, B3, B4, B8, B5, B6, B7, B8A, B11, B12.
-
-    Возвращаемые индексы
-    --------------------
-    NDVI  : нормализованный вегетационный индекс  (B8-B4)/(B8+B4)
-    NDWI  : нормализованный водный индекс         (B3-B8)/(B3+B8)
-    NDBI  : нормализованный индекс застройки      (B11-B8)/(B11+B8)
-    Total_Brightness : сумма всех 10 каналов
-    Norm_Bx : нормированные (инварианты освещённости) значения каналов
-
-    Parameters
-    ----------
-    img_10ch : (10, H, W) float-массив
-
-    Returns
-    -------
-    indices : dict str → (H, W) float32
-    """
-    eps = 1e-8
-    B2, B3, B4, B8 = img_10ch[0], img_10ch[1], img_10ch[2], img_10ch[3]
-    B11, B12        = img_10ch[8], img_10ch[9]
-
-    ndvi = (B8  - B4)  / (B8  + B4  + eps)
-    ndwi = (B3  - B8)  / (B3  + B8  + eps)
-    ndbi = (B11 - B8)  / (B11 + B8  + eps)
-    total_brightness = np.sum(img_10ch, axis=0)
-    norm_channels    = img_10ch / (total_brightness + eps)
-
-    indices = {
-        'NDVI': ndvi.astype(np.float32),
-        'NDWI': ndwi.astype(np.float32),
-        'NDBI': ndbi.astype(np.float32),
-        'Total_Brightness': total_brightness.astype(np.float32),
-    }
-    for i, name in enumerate(['B2', 'B3', 'B4', 'B8', 'B5', 'B6', 'B7', 'B8A', 'B11', 'B12']):
-        indices[f'Norm_{name}'] = norm_channels[i].astype(np.float32)
-
-    return indices
-
-
-def extract_all_features(image: np.ndarray, window_size: int = 15,
-                          is_multispectral: bool = False) -> dict:
-    """
-    Главная функция генерации признакового пространства.
-
-    Формирует полный набор признаков:
-      - спектральные индексы (NDVI, NDWI, NDBI и нормированные каналы)
-        — только при is_multispectral=True
-      - локальное среднее Mean и стандартное отклонение Std
-      - 4 направленных корреляции (Rho_0, Rho_90, Rho_45, Rho_135)
-      - агрегаты: Rho_Avg (среднее), Rho_Range (размах)
-      - для одноканального входа: сохраняется Original
-
-    Parameters
-    ----------
-    image           : (C, H, W) многоканальный или (H, W) одноканальный
-    window_size     : размер скользящего окна (рекомендуется 15)
-    is_multispectral: True — считать спектральные индексы
-
-    Returns
-    -------
-    feature_space : dict str → (H, W) float32/float64
-    """
-    feature_space = {}
-
-    # --- Спектральные признаки ---
-    if is_multispectral and image.ndim == 3:
-        print("  📡 Вычисление спектральных индексов (NDVI, NDWI, NDBI)...")
-        indices = compute_spectral_indices(image)
-        feature_space.update(indices)
-        gray_image = np.mean(image, axis=0).astype(np.float32)
-    else:
-        gray_image = image.astype(np.float32)
-        feature_space['Original'] = gray_image
-
-    # --- Локальные статистики ---
-    print(f"  📐 Локальные статистики (окно {window_size}×{window_size})...")
-    mean, var, std = get_fast_stats(gray_image, window_size)
-    feature_space['Mean'] = mean.astype(np.float32)
-    feature_space['Std']  = std.astype(np.float32)
-
-    # --- Текстурные корреляции ---
-    print("  🧵 Направленные корреляции (0°, 90°, 45°, 135°)...")
-    rhos = calc_directional_rho(gray_image, mean, var, window_size)
-    feature_space['Rho_Avg']   = ((rhos['0'] + rhos['90'] + rhos['45'] + rhos['135']) / 4).astype(np.float32)
-    feature_space['Rho_Range'] = (
-        np.maximum.reduce([rhos['0'], rhos['90'], rhos['45'], rhos['135']]) -
-        np.minimum.reduce([rhos['0'], rhos['90'], rhos['45'], rhos['135']])
-    ).astype(np.float32)
-    for angle in ('0', '90', '45', '135'):
-        feature_space[f'Rho_{angle}'] = rhos[angle].astype(np.float32)
-
-    return feature_space
-
-
-def make_feature_sandwich(feature_dict: dict):
-    """
-    Собирает словарь признаков в трёхмерный массив (H, W, C).
-
-    Parameters
-    ----------
-    feature_dict : dict str → (H, W)
-
-    Returns
-    -------
-    dataset : (H, W, C) float32
-    names   : list[str] — имена каналов в том же порядке
-    """
-    names    = list(feature_dict.keys())
-    channels = [feature_dict[name].astype(np.float32) for name in names]
-    dataset  = np.stack(channels, axis=-1)   # (H, W, C)
-    return dataset, names
-
-
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 2: ЗАГРУЗКА ДАННЫХ (loader.py)
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-# Порядок каналов Sentinel-2 в датасете MultiSenGE
-SENTINEL2_CHANNELS = {
-    'B2': 1, 'B3': 2, 'B4': 3, 'B8': 4,
-    'B5': 5, 'B6': 6, 'B7': 7, 'B8A': 8,
-    'B11': 9, 'B12': 10
-}
-
 # Имена классов MultiSenGE (CORINE Land Cover)
+# ---------------------------------------------------------------------------
 CLASS_NAMES = {
     1:  'Непрерывная городская застройка',
     2:  'Прерывистая городская застройка',
@@ -268,1124 +75,1214 @@ CLASS_NAMES = {
     14: 'Луга',
 }
 
+PALETTE = {
+    1: '#E76F51', 2: '#E63946', 3: '#FF9F1C', 4: '#FFBE0B',
+    5: '#8338EC', 6: '#3A86FF', 7: '#6D6875', 8: '#F4A261',
+    9: '#48CAE4', 10: '#023E8A', 11: '#2A9D8F', 12: '#52B788',
+    13: '#74C69D', 14: '#8AC926',
+}
+DEFAULT_COLORS = plt.cm.tab10.colors
 
-def load_pair(s2_name: str, gr_name: str, data_dir: str = None):
+# ---------------------------------------------------------------------------
+# ПАРАМЕТРЫ MULTI-PATCH ЭКСПЕРИМЕНТА
+# ---------------------------------------------------------------------------
+N_PATCHES        = 8        # сколько случайных патчей брать
+RANDOM_SEED      = 42       # для воспроизводимости
+MAX_PIXELS_TOTAL = 120_000  # ограничение выборки (для скорости kNN)
+WINDOW_SIZE      = 15       # окно текстурных признаков
+USE_MULTISPECTRAL = True    # использовать ли спектральные индексы
+
+
+def _label(cls):
+    name = CLASS_NAMES.get(cls, f'Класс {cls}')
+    return f"C{cls}: {name[:18]}{'…' if len(name)>18 else ''}"
+
+# ===========================================================================
+# ЧАСТЬ 1: ВЫЧИСЛЕНИЕ ПРИЗНАКОВ (fast_features.py)
+# ===========================================================================
+
+def get_fast_stats(image, window_size):
     """
-    Загружает пару файлов: 10-канальный снимок Sentinel-2 и эталонную маску.
-
-    Parameters
-    ----------
-    s2_name  : имя файла снимка (.tif)
-    gr_name  : имя файла маски (.tif)
-    data_dir : корневая папка с данными (data/)
-
-    Returns
-    -------
-    image : (10, H, W) float32  — значения отражательной способности
-    mask  : (H, W)  uint8       — метки классов 1..14, 0 — фон
+    Локальное среднее, дисперсия и СКО за O(1) на пиксель.
+    Использует integral image через uniform_filter.
     """
+    img64   = image.astype(np.float64)
+    mean    = uniform_filter(img64,      size=window_size, mode='mirror')
+    sq_mean = uniform_filter(img64 ** 2, size=window_size, mode='mirror')
+    var     = np.maximum(sq_mean - mean ** 2, 0.0)
+    return mean, var, np.sqrt(var)
+
+
+def calc_directional_rho(image, mean, var, window_size):
+    """
+    Направленные коэффициенты корреляции: 0°, 90°, 45°, 135°.
+    Нормированная локальная ковариация пикселя со сдвинутым соседом.
+    """
+    eps  = 1e-10
+    dirs = {'0': (0,1), '90': (1,0), '45': (1,1), '135': (1,-1)}
+    rhos = {}
+    for angle, (dy, dx) in dirs.items():
+        shifted = np.roll(np.roll(image, -dy, axis=0), -dx, axis=1)
+        f_adj   = uniform_filter(image * shifted, size=window_size, mode='mirror')
+        rhos[angle] = np.clip((f_adj - mean**2) / (var + eps), -1.0, 1.0)
+    return rhos
+
+
+def compute_spectral_indices(img_10ch):
+    """
+    Спектральные индексы Sentinel-2.
+    Порядок каналов: B2 B3 B4 B8 B5 B6 B7 B8A B11 B12
+    """
+    eps = 1e-8
+    B2, B3, B4, B8 = img_10ch[0], img_10ch[1], img_10ch[2], img_10ch[3]
+    B11             = img_10ch[8]
+    total           = np.sum(img_10ch, axis=0)
+    norm            = img_10ch / (total + eps)
+
+    out = {
+        'NDVI': ((B8 - B4) / (B8 + B4 + eps)).astype(np.float32),
+        'NDWI': ((B3 - B8) / (B3 + B8 + eps)).astype(np.float32),
+        'NDBI': ((B11- B8) / (B11+ B8 + eps)).astype(np.float32),
+        'Total_Brightness': total.astype(np.float32),
+    }
+    for i, n in enumerate(['B2','B3','B4','B8','B5','B6','B7','B8A','B11','B12']):
+        out[f'Norm_{n}'] = norm[i].astype(np.float32)
+    return out
+
+
+def extract_all_features(image, window_size=15, is_multispectral=False):
+    """
+    Полное признаковое пространство:
+      - (опционально) спектральные индексы + нормированные каналы
+      - локальное среднее Mean и СКО Std
+      - 6 текстурных признаков: Rho_Avg, Rho_Range, Rho_0, Rho_90, Rho_45, Rho_135
+    """
+    fs = {}
+    if is_multispectral and image.ndim == 3:
+        print("  📡 Спектральные индексы (NDVI, NDWI, NDBI)...")
+        fs.update(compute_spectral_indices(image))
+        gray = np.mean(image, axis=0).astype(np.float32)
+    else:
+        gray = image.astype(np.float32)
+        fs['Original'] = gray
+
+    print(f"  📐 Локальные статистики (окно {window_size}×{window_size})...")
+    mean, var, std = get_fast_stats(gray, window_size)
+    fs['Mean'] = mean.astype(np.float32)
+    fs['Std']  = std.astype(np.float32)
+
+    print("  🧵 Направленные корреляции (0°, 90°, 45°, 135°)...")
+    rhos = calc_directional_rho(gray, mean, var, window_size)
+    fs['Rho_Avg']   = ((rhos['0']+rhos['90']+rhos['45']+rhos['135'])/4).astype(np.float32)
+    fs['Rho_Range'] = (
+        np.maximum.reduce(list(rhos.values())) -
+        np.minimum.reduce(list(rhos.values()))
+    ).astype(np.float32)
+    for a in ('0','90','45','135'):
+        fs[f'Rho_{a}'] = rhos[a].astype(np.float32)
+    return fs
+
+
+def make_feature_sandwich(fd):
+    """dict → (H,W,C) float32 + список имён каналов."""
+    names = list(fd.keys())
+    return np.stack([fd[n].astype(np.float32) for n in names], axis=-1), names
+
+# ===========================================================================
+# ЧАСТЬ 2: ЗАГРУЗКА ДАННЫХ (loader.py)
+# ===========================================================================
+
+SENTINEL2_CHANNELS = {
+    'B2':1,'B3':2,'B4':3,'B8':4,'B5':5,'B6':6,'B7':7,'B8A':8,'B11':9,'B12':10
+}
+
+
+def load_pair(s2_name, gr_name, data_dir=None):
+    """Загружает (10,H,W) float32 снимок и (H,W) uint8 маску."""
     if not HAS_RASTERIO:
         raise ImportError("rasterio не установлен")
     if data_dir is None:
         data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
-
-    s2_path = os.path.join(data_dir, 's2_pref', s2_name.strip())
-    gr_path = os.path.join(data_dir, 'ground_reference', gr_name.strip())
-
-    with rasterio.open(s2_path) as src:
-        image = src.read().astype(np.float32)   # (10, H, W)
-    with rasterio.open(gr_path) as src:
-        mask = src.read(1).astype(np.uint8)     # (H, W)
-
+    with rasterio.open(os.path.join(data_dir,'s2_pref', s2_name.strip())) as s:
+        image = s.read().astype(np.float32)
+    with rasterio.open(os.path.join(data_dir,'ground_reference', gr_name.strip())) as s:
+        mask = s.read(1).astype(np.uint8)
     return image, mask
 
 
-def get_file_lists(lists_dir: str = None):
-    """
-    Читает списки файлов из текстовых файлов out_s2_pref.txt / out_gr_pref.txt.
-
-    Parameters
-    ----------
-    lists_dir : папка со списками (lists/)
-
-    Returns
-    -------
-    s2_files, gr_files : list[str]
-    """
+def get_file_lists(lists_dir=None):
+    """Читает out_s2_pref.txt / out_gr_pref.txt."""
     if lists_dir is None:
-        lists_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'lists')
-
-    with open(os.path.join(lists_dir, 'out_s2_pref.txt'), 'r') as f:
-        s2_files = [l.strip() for l in f if l.strip()]
-    with open(os.path.join(lists_dir, 'out_gr_pref.txt'), 'r') as f:
-        gr_files = [l.strip() for l in f if l.strip()]
-
-    return s2_files, gr_files
+        lists_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','lists')
+    with open(os.path.join(lists_dir,'out_s2_pref.txt')) as f:
+        s2 = [l.strip() for l in f if l.strip()]
+    with open(os.path.join(lists_dir,'out_gr_pref.txt')) as f:
+        gr = [l.strip() for l in f if l.strip()]
+    return s2, gr
 
 
-def auto_find_data(project_root: str = None):
+def select_random_pairs(n_patches=N_PATCHES, seed=RANDOM_SEED):
     """
-    Автоматически ищет первую пару (снимок, маска) в структуре проекта.
-
-    Returns
-    -------
-    img_path, mask_path : str | None
+    Случайным образом выбирает N патчей из датасета MultiSenGE.
+    Возвращает список кортежей (s2_filename, gr_filename).
     """
+    s2_list, gr_list = get_file_lists()
+
+    if len(s2_list) != len(gr_list):
+        raise ValueError("Количество снимков и масок не совпадает")
+
+    pairs = list(zip(s2_list, gr_list))
+
+    rng = random.Random(seed)
+    rng.shuffle(pairs)
+
+    selected = pairs[:n_patches]
+
+    print(f"\n🎲 Выбрано случайных патчей: {len(selected)}")
+    for i, (s2, gr) in enumerate(selected, 1):
+        print(f"  {i}. {s2}")
+
+    return selected
+
+
+def build_global_dataset(feature_cube, mask):
+    """
+    Преобразует (H,W,C) → табличную выборку валидных (непустых) пикселей.
+
+    Параметры
+    ---------
+    feature_cube : ndarray (H, W, C)
+    mask         : ndarray (H, W), 0 = фон
+
+    Возвращает
+    ----------
+    X : ndarray (N, C)  — признаки
+    y : ndarray (N,)    — метки классов
+    """
+    h, w, c = feature_cube.shape
+    X = feature_cube.reshape(-1, c)
+    y = mask.flatten()
+
+    valid = y > 0
+    return X[valid], y[valid]
+
+
+def subsample_dataset(X, y, max_samples=MAX_PIXELS_TOTAL, seed=RANDOM_SEED):
+    """
+    Ограничивает размер выборки для ускорения kNN и Cross-Validation.
+    Стратифицирует по классам, чтобы сохранить пропорции.
+    """
+    if len(X) <= max_samples:
+        return X, y
+
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(X), size=max_samples, replace=False)
+    return X[idx], y[idx]
+
+
+def rebuild_feature_cube(X, y):
+    """
+    Временно восстанавливает псевдо-куб (N,1,C) и маску (N,1) из плоской
+    выборки — для совместимости с функциями визуализации, ожидающими 3D-массив.
+    """
+    n, c = X.shape
+    dataset = X.reshape(n, 1, c)
+    mask    = y.reshape(n, 1)
+    return dataset, mask
+
+
+def auto_find_data(project_root=None):
+    """Ищет первую пару .tif в стандартной структуре проекта."""
     if project_root is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    data_dir  = os.path.join(project_root, 'data')
-    s2_dir    = os.path.join(data_dir, 's2_pref')
-    mask_dir  = os.path.join(data_dir, 'ground_reference')
-
-    img_path  = None
-    mask_path = None
-
-    for d, store in [(s2_dir, 'img'), (mask_dir, 'mask')]:
-        if not os.path.isdir(d):
-            continue
-        for fname in sorted(os.listdir(d)):
-            if fname.lower().endswith(('.tif', '.tiff')):
-                if store == 'img' and img_path is None:
-                    img_path = os.path.join(d, fname)
-                elif store == 'mask' and mask_path is None:
-                    mask_path = os.path.join(d, fname)
-
+    img_path = mask_path = None
+    for d, key in [(os.path.join(project_root,'data','s2_pref'),     'img'),
+                   (os.path.join(project_root,'data','ground_reference'),'mask')]:
+        if not os.path.isdir(d): continue
+        for f in sorted(os.listdir(d)):
+            if f.lower().endswith(('.tif','.tiff')):
+                if key == 'img'  and img_path  is None: img_path  = os.path.join(d,f)
+                if key == 'mask' and mask_path is None: mask_path = os.path.join(d,f)
     return img_path, mask_path
 
+# ===========================================================================
+# ЧАСТЬ 3: СТАТИСТИЧЕСКИЙ АНАЛИЗ (evaluate_features.py)
+# ===========================================================================
 
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 3: СТАТИСТИЧЕСКИЙ АНАЛИЗ КЛАССОВ (evaluate_features.py)
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-def calculate_class_stats(dataset: np.ndarray, mask: np.ndarray, class_id: int):
-    """
-    Извлекает пиксели заданного класса и вычисляет вектор средних и
-    ковариационную матрицу.
-
-    Parameters
-    ----------
-    dataset  : (H, W, C) float — признаковый куб
-    mask     : (H, W) int     — маска классов
-    class_id : int            — номер класса
-
-    Returns
-    -------
-    mean_vec : (C,)  float64 | None
-    cov_mat  : (C, C) float64 | None
-    """
-    mask_flat    = mask.flatten()
-    data_flat    = dataset.reshape(-1, dataset.shape[-1])
-    pixels       = data_flat[mask_flat == class_id]
-
-    if len(pixels) < 5:
-        print(f"   Класс {class_id}: недостаточно пикселей ({len(pixels)})")
+def calculate_class_stats(dataset, mask, class_id):
+    """Вектор средних + ковариационная матрица для пикселей класса."""
+    flat = mask.flatten()
+    X    = dataset.reshape(-1, dataset.shape[-1])[flat == class_id]
+    if len(X) < 5:
+        print(f"   Класс {class_id}: недостаточно пикселей ({len(X)})")
         return None, None
-
-    print(f"   Класс {class_id} ({CLASS_NAMES.get(class_id, '?')}): {len(pixels)} px")
-    mean_vec = np.mean(pixels, axis=0)
-    cov_mat  = np.cov(pixels, rowvar=False)
-    if cov_mat.ndim == 0:
-        cov_mat = np.array([[float(cov_mat)]])
-    cov_mat += np.eye(cov_mat.shape[0]) * 1e-6   # регуляризация
-    return mean_vec, cov_mat
+    print(f"   Класс {class_id} ({CLASS_NAMES.get(class_id,'?')}): {len(X)} пкс")
+    cov = np.cov(X, rowvar=False)
+    if cov.ndim == 0: cov = np.array([[float(cov)]])
+    cov += np.eye(cov.shape[0]) * 1e-6
+    return np.mean(X, axis=0), cov
 
 
-def mahalanobis_distance(m1, m2, cov1, cov2) -> float:
-    """
-    Расстояние Махаланобиса при допущении общей (усреднённой) ковариации.
-
-        D_M = sqrt((m1-m2)^T · Σ^{-1} · (m1-m2)),   Σ = (Σ1+Σ2)/2
-
-    Высокое значение означает хорошую разделимость классов по положению
-    центров в признаковом пространстве.
-    """
-    avg_cov = (cov1 + cov2) / 2
+def mahalanobis_distance(m1, m2, cov1, cov2):
+    """D_M = sqrt((m1-m2)^T · ((Σ1+Σ2)/2)^{-1} · (m1-m2))"""
     try:
-        inv_cov = np.linalg.inv(avg_cov)
-        diff    = m1 - m2
-        dist    = float(np.sqrt(diff @ inv_cov @ diff))
-        return dist
+        inv = np.linalg.inv((cov1+cov2)/2)
+        d   = m1-m2
+        return float(np.sqrt(d @ inv @ d))
     except np.linalg.LinAlgError:
         return np.nan
 
 
-def bhattacharyya_distance(m1, m2, cov1, cov2) -> float:
+def bhattacharyya_distance(m1, m2, cov1, cov2):
     """
-    Расстояние Бхаттачарьи.
-
-    Учитывает как разницу центров, так и форму/объём эллипсоидов
-    распределений, что делает его более полным критерием разделимости:
-
-        D_B = (1/8)(m1-m2)^T Σ^{-1}(m1-m2)
-              + (1/2) ln( det(Σ) / sqrt(det(Σ1)·det(Σ2)) )
-
-    где Σ = (Σ1+Σ2)/2.
+    D_B = (1/8)(m1-m2)^T Σ^{-1}(m1-m2) + (1/2)ln(det Σ / sqrt(det Σ1 · det Σ2))
+    где Σ = (Σ1+Σ2)/2
     """
-    cov  = (cov1 + cov2) / 2
-    diff = m1 - m2
+    cov  = (cov1+cov2)/2
+    diff = m1-m2
     try:
         term1 = 0.125 * float(diff @ np.linalg.inv(cov) @ diff)
-        sign1, ld_cov = np.linalg.slogdet(cov)
-        sign2, ld_c1  = np.linalg.slogdet(cov1)
-        sign3, ld_c2  = np.linalg.slogdet(cov2)
-        if sign1 <= 0 or sign2 <= 0 or sign3 <= 0:
-            return np.nan
-        term2 = 0.5 * (ld_cov - 0.5 * (ld_c1 + ld_c2))
-        return term1 + term2
+        s1,ld1 = np.linalg.slogdet(cov)
+        s2,ld2 = np.linalg.slogdet(cov1)
+        s3,ld3 = np.linalg.slogdet(cov2)
+        if s1<=0 or s2<=0 or s3<=0: return np.nan
+        return term1 + 0.5*(ld1 - 0.5*(ld2+ld3))
     except (np.linalg.LinAlgError, ValueError):
         return np.nan
 
 
-def compute_all_pairwise_distances(stats: dict, classes: list):
-    """
-    Вычисляет матрицы попарных расстояний Махаланобиса и Бхаттачарьи
-    для всех пар классов.
+def compute_all_pairwise_distances(stats, classes):
+    """Матрицы попарных расстояний Махаланобиса и Бхаттачарьи."""
+    n      = len(classes)
+    mm, mb = np.zeros((n,n)), np.zeros((n,n))
+    lbl    = [f"C{c}" for c in classes]
+    for i,c1 in enumerate(classes):
+        for j,c2 in enumerate(classes):
+            if i==j or c1 not in stats or c2 not in stats: continue
+            m1,v1 = stats[c1]['mean'], stats[c1]['cov']
+            m2,v2 = stats[c2]['mean'], stats[c2]['cov']
+            mm[i,j] = mahalanobis_distance(m1,m2,v1,v2)
+            mb[i,j] = bhattacharyya_distance(m1,m2,v1,v2)
+    return (pd.DataFrame(mm, index=lbl, columns=lbl),
+            pd.DataFrame(mb, index=lbl, columns=lbl))
 
-    Parameters
-    ----------
-    stats   : {class_id: {'mean': ..., 'cov': ...}}
-    classes : список идентификаторов классов
+# ===========================================================================
+# ЧАСТЬ 4: FORWARD SELECTION — БХАТТАЧАРЬЯ (forward_selection_stats.py)
+# ===========================================================================
 
-    Returns
-    -------
-    df_maha, df_bhatta : pd.DataFrame (симметричные матрицы)
-    """
-    n         = len(classes)
-    mat_maha  = np.zeros((n, n))
-    mat_bhatt = np.zeros((n, n))
-    labels    = [f"C{c}" for c in classes]
-
-    for i, c1 in enumerate(classes):
-        for j, c2 in enumerate(classes):
-            if i == j:
-                continue
-            if c1 not in stats or c2 not in stats:
-                continue
-            m1, cov1 = stats[c1]['mean'], stats[c1]['cov']
-            m2, cov2 = stats[c2]['mean'], stats[c2]['cov']
-            mat_maha[i, j]  = mahalanobis_distance(m1, m2, cov1, cov2)
-            mat_bhatt[i, j] = bhattacharyya_distance(m1, m2, cov1, cov2)
-
-    df_maha  = pd.DataFrame(mat_maha,  index=labels, columns=labels)
-    df_bhatt = pd.DataFrame(mat_bhatt, index=labels, columns=labels)
-    return df_maha, df_bhatt
-
-
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 4: СТАТИСТИЧЕСКИЙ FORWARD SELECTION — БХАТТАЧАРЬЯ
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-def calculate_bhatta_dist(X1: np.ndarray, X2: np.ndarray) -> float:
-    """
-    Расстояние Бхаттачарьи для двух многомерных выборок.
-
-    Надёжная реализация с регуляризацией и обработкой вырожденных случаев.
-    Работает как для одного признака, так и для набора из N признаков.
-
-    Parameters
-    ----------
-    X1, X2 : (N1, D) и (N2, D) — выборки пикселей двух классов
-             (допустимо передать (N,) для одного признака)
-
-    Returns
-    -------
-    float : расстояние Бхаттачарьи ≥ 0
-    """
-    if len(X1) < 5 or len(X2) < 5:
-        return 0.0
-    if X1.ndim == 1:
-        X1 = X1.reshape(-1, 1)
-    if X2.ndim == 1:
-        X2 = X2.reshape(-1, 1)
-
-    m1, m2 = np.mean(X1, axis=0), np.mean(X2, axis=0)
-    c1 = np.cov(X1, rowvar=False)
-    c2 = np.cov(X2, rowvar=False)
-    if c1.ndim == 0: c1 = np.array([[float(c1)]])
-    if c2.ndim == 0: c2 = np.array([[float(c2)]])
-
-    reg = np.eye(c1.shape[0]) * 1e-6
-    c1 += reg; c2 += reg
-    cov = (c1 + c2) / 2
-
+def _bhatta_samples(X1, X2):
+    """Расстояние Бхаттачарьи по двум выборкам (надёжная версия)."""
+    if len(X1)<5 or len(X2)<5: return 0.0
+    if X1.ndim==1: X1=X1.reshape(-1,1)
+    if X2.ndim==1: X2=X2.reshape(-1,1)
+    m1,m2 = np.mean(X1,axis=0), np.mean(X2,axis=0)
+    c1,c2 = np.cov(X1,rowvar=False), np.cov(X2,rowvar=False)
+    if c1.ndim==0: c1=np.array([[float(c1)]])
+    if c2.ndim==0: c2=np.array([[float(c2)]])
+    reg=np.eye(c1.shape[0])*1e-6; c1+=reg; c2+=reg
+    cov=(c1+c2)/2
     try:
-        inv_cov = np.linalg.inv(cov)
-        diff    = m1 - m2
-        term1   = 0.125 * float(diff @ inv_cov @ diff)
-        s1, ld1 = np.linalg.slogdet(cov)
-        s2, ld2 = np.linalg.slogdet(c1)
-        s3, ld3 = np.linalg.slogdet(c2)
-        if s1 <= 0 or s2 <= 0 or s3 <= 0:
-            return 0.0
-        term2 = 0.5 * (ld1 - 0.5 * (ld2 + ld3))
-        return float(term1 + term2)
+        term1=0.125*float((m1-m2)@np.linalg.inv(cov)@(m1-m2))
+        s1,ld1=np.linalg.slogdet(cov)
+        s2,ld2=np.linalg.slogdet(c1)
+        s3,ld3=np.linalg.slogdet(c2)
+        if s1<=0 or s2<=0 or s3<=0: return 0.0
+        return float(term1+0.5*(ld1-0.5*(ld2+ld3)))
     except np.linalg.LinAlgError:
         return 0.0
 
 
-def forward_selection_bhatta(dataset: np.ndarray, mask: np.ndarray,
-                               target_classes=(2, 11),
-                               eps: float = 0.001,
-                               max_features: int = 10):
+def forward_selection_bhatta(dataset, mask, target_classes=(2,11),
+                              eps=0.001, max_features=10):
     """
-    Жадный (greedy) алгоритм отбора признаков — Forward Selection —
-    по критерию расстояния Бхаттачарьи.
-
-    На каждом шаге добавляется тот признак, который максимизирует прирост
-    D_B(selected + {candidate}). Алгоритм останавливается, если прирост
-    падает ниже порога eps или достигнут лимит max_features.
-
-    Parameters
-    ----------
-    dataset        : (H, W, C) признаковый куб
-    mask           : (H, W) маска классов
-    target_classes : пара классов (class1, class2)
-    eps            : порог остановки по приросту D_B
-    max_features   : максимум отбираемых признаков
-
-    Returns
-    -------
-    selected : list[int]   — индексы отобранных признаков
-    history  : list[float] — накопленный D_B после каждого шага
+    Жадный (greedy) Forward Selection по критерию расстояния Бхаттачарьи.
+    На каждом шаге добавляется признак с максимальным приростом D_B.
+    Остановка: прирост < eps или достигнут лимит max_features.
     """
-    h, w, c  = dataset.shape
-    mask_flat = mask.flatten()
-    feat_mat  = dataset.reshape(-1, c)
+    h,w,c   = dataset.shape
+    flat    = mask.flatten()
+    X       = dataset.reshape(-1,c)
+    X1,X2   = X[flat==target_classes[0]], X[flat==target_classes[1]]
 
-    X1 = feat_mat[mask_flat == target_classes[0]]
-    X2 = feat_mat[mask_flat == target_classes[1]]
+    if len(X1)<10 or len(X2)<10:
+        print(f"❌ Мало пикселей: C{target_classes[0]}={len(X1)}, C{target_classes[1]}={len(X2)}")
+        return [],[]
 
-    if len(X1) < 10 or len(X2) < 10:
-        print(f"❌ Недостаточно пикселей: класс {target_classes[0]}: {len(X1)}, "
-              f"класс {target_classes[1]}: {len(X2)}")
-        return [], []
-
-    selected     = []
-    current_dist = 0.0
-    history      = []
-
+    selected, cur, history = [], 0.0, []
     print(f"\n🔍 Forward Selection (Бхаттачарья): классы {target_classes}")
+
     for step in range(max_features):
-        best_feat, best_gain = -1, -1.0
+        best_f, best_g = -1, -1.0
         for i in range(c):
-            if i in selected:
-                continue
-            idxs = selected + [i]
-            dist = calculate_bhatta_dist(X1[:, idxs], X2[:, idxs])
-            gain = dist - current_dist
-            if gain > best_gain:
-                best_gain, best_feat = gain, i
-
-        if best_gain < eps or best_feat == -1:
-            print(f"  ⏹️  Остановка на шаге {step}. Прирост {best_gain:.5f} < {eps}")
+            if i in selected: continue
+            gain = _bhatta_samples(X1[:,selected+[i]], X2[:,selected+[i]]) - cur
+            if gain > best_g: best_g,best_f = gain,i
+        if best_g < eps or best_f==-1:
+            print(f"  ⏹  Остановка на шаге {step}. Прирост {best_g:.5f} < {eps}")
             break
-
-        selected.append(best_feat)
-        current_dist += best_gain
-        history.append(current_dist)
-        print(f"  Шаг {step+1}: признак #{best_feat:>2d}, D_B = {current_dist:.4f} (+{best_gain:.4f})")
+        selected.append(best_f); cur+=best_g; history.append(cur)
+        print(f"  Шаг {step+1}: признак #{best_f:>2d}, D_B={cur:.4f} (+{best_g:.4f})")
 
     return selected, history
 
+# ===========================================================================
+# ЧАСТЬ 5: FORWARD SELECTION — ML / kNN  (forward_selection_ml.py)
+# ===========================================================================
 
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 5: ML FORWARD SELECTION — kNN + 5-FOLD CV
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-def forward_selection_ml(dataset: np.ndarray, mask: np.ndarray,
-                          target_classes=None,
-                          eps: float = 0.001,
-                          max_features: int = 10,
-                          max_samples: int = 20_000):
+def forward_selection_ml(dataset, mask, target_classes=None,
+                          eps=0.001, max_features=10, max_samples=20_000):
     """
-    Жадный отбор признаков по приросту точности классификации kNN.
-
-    Используется 5-кратная кросс-валидация (StratifiedKFold), метрика —
-    macro accuracy. Масштабирование признаков (StandardScaler) применяется
-    перед kNN, т.к. евклидово расстояние чувствительно к шкале.
-
-    Parameters
-    ----------
-    dataset       : (H, W, C) признаковый куб
-    mask          : (H, W) маска классов
-    target_classes: список классов (None = все ненулевые)
-    eps           : минимальный прирост точности для продолжения
-    max_features  : лимит отбираемых признаков
-    max_samples   : ограничение выборки (для скорости CV)
-
-    Returns
-    -------
-    selected : list[int]   — индексы отобранных признаков
-    history  : list[float] — точность CV после каждого шага
+    Forward Selection по точности kNN (k=5, 5-fold CV, macro accuracy).
+    StandardScaler применяется перед kNN (евклидово расстояние чувствительно к шкале).
+    Выборка ограничена max_samples для скорости кросс-валидации.
     """
-    h, w, c   = dataset.shape
-    mask_flat = mask.flatten()
-    feat_mat  = dataset.reshape(-1, c)
-
-    valid = mask_flat > 0
-    X_all = feat_mat[valid]
-    y_all = mask_flat[valid]
+    h,w,c = dataset.shape
+    flat  = mask.flatten()
+    X_all = dataset.reshape(-1,c)[flat>0]
+    y_all = flat[flat>0]
 
     if target_classes is not None:
         sel   = np.isin(y_all, target_classes)
-        X_all = X_all[sel]; y_all = y_all[sel]
+        X_all,y_all = X_all[sel],y_all[sel]
 
-    if len(X_all) > max_samples:
-        rng = np.random.default_rng(42)
-        idx = rng.choice(len(X_all), max_samples, replace=False)
-        X_all = X_all[idx]; y_all = y_all[idx]
+    if len(X_all)>max_samples:
+        rng=np.random.default_rng(42)
+        idx=rng.choice(len(X_all),max_samples,replace=False)
+        X_all,y_all=X_all[idx],y_all[idx]
 
-    print(f"\n🤖 Forward Selection (kNN): {len(X_all)} пикселей, "
-          f"{len(np.unique(y_all))} классов")
-
-    scaler   = StandardScaler()
-    X_scaled = scaler.fit_transform(X_all)
-
-    selected     = []
-    current_acc  = 0.0
-    history      = []
+    print(f"\n🤖 Forward Selection (kNN): {len(X_all)} пкс, {len(np.unique(y_all))} классов")
+    Xs       = StandardScaler().fit_transform(X_all)
+    selected, cur, history = [], 0.0, []
 
     for step in range(max_features):
-        best_feat, best_acc, best_gain = -1, -1.0, -1.0
+        best_f,best_a,best_g = -1,-1.0,-1.0
         for i in range(c):
-            if i in selected:
-                continue
-            idxs    = selected + [i]
-            X_sub   = X_scaled[:, idxs]
-            clf     = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
-            scores  = cross_val_score(clf, X_sub, y_all, cv=5, scoring='accuracy')
-            acc     = scores.mean()
-            gain    = acc - current_acc
-            if gain > best_gain:
-                best_gain, best_feat, best_acc = gain, i, acc
-
-        if best_gain < eps or best_feat == -1:
-            print(f"  ⏹️  Остановка на шаге {step}. Прирост {best_gain:.4f} < {eps}")
+            if i in selected: continue
+            acc  = cross_val_score(KNeighborsClassifier(5,n_jobs=-1),
+                                   Xs[:,selected+[i]], y_all,
+                                   cv=5, scoring='accuracy').mean()
+            gain = acc-cur
+            if gain>best_g: best_g,best_f,best_a=gain,i,acc
+        if best_g<eps or best_f==-1:
+            print(f"  ⏹  Остановка на шаге {step}. Прирост {best_g:.4f} < {eps}")
             break
-
-        selected.append(best_feat)
-        current_acc = best_acc
-        history.append(current_acc)
-        print(f"  Шаг {step+1}: признак #{best_feat:>2d}, Accuracy = {current_acc:.4f} (+{best_gain:.4f})")
+        selected.append(best_f); cur=best_a; history.append(cur)
+        print(f"  Шаг {step+1}: признак #{best_f:>2d}, Acc={cur:.4f} (+{best_g:.4f})")
 
     return selected, history
 
-
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 6: ДЕМО-ДАННЫЕ (используются при отсутствии реальных снимков)
-# ============================================================================
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# ЧАСТЬ 6: ДЕМО-ДАННЫЕ
+# ===========================================================================
 
 def _generate_synthetic_data(H=256, W=256, seed=42):
     """
-    Генерирует синтетические данные, имитирующие признаковое пространство
-    классификации земного покрова, для тестирования без реальных снимков.
-
-    Создаёт два класса с разными статистическими характеристиками:
-      - Класс 2  : прерывистая городская застройка (высокая яркость, низкая текстура)
-      - Класс 11 : широколиственные леса           (средняя яркость, высокая текстура)
+    Синтетические данные для тестирования без реальных снимков.
+    Два основных класса (2 — город, 11 — лес) + два дополнительных.
     """
     rng = np.random.default_rng(seed)
-    img = rng.integers(30, 220, size=(H, W), dtype=np.uint8)
+    img = rng.integers(30, 220, size=(H,W), dtype=np.uint8)
+    mask= np.zeros((H,W), dtype=np.uint8)
 
-    # Маска: верхний левый квадрант — класс 2, нижний правый — класс 11
-    mask = np.zeros((H, W), dtype=np.uint8)
-    mask[:H//2, :W//2] = 2    # городская застройка
-    mask[H//2:, W//2:] = 11   # лесной массив
-    # Добавляем ещё несколько классов для полноты анализа
-    mask[:H//4, W//2:] = 3
-    mask[H//2:, :W//4] = 14
+    # Квадранты
+    mask[:H//2, :W//2] = 2    # город (яркий)
+    mask[H//2:,  W//2:]= 11   # лес   (тёмный, шумный)
+    mask[:H//4,  W//2:]= 3    # промзона
+    mask[H//2:, :W//4] = 14   # луга
 
-    # «Город» ярче, «лес» немного темнее со случайной текстурой
-    img[:H//2, :W//2] = np.clip(
-        rng.normal(160, 20, size=(H//2, W//2)), 80, 255).astype(np.uint8)
-    img[H//2:, W//2:] = np.clip(
-        rng.normal(90, 35, size=(H//2, W//2)), 20, 200).astype(np.uint8)
-
+    img[:H//2,:W//2] = np.clip(rng.normal(160,20,(H//2,W//2)), 80,255).astype(np.uint8)
+    img[H//2:, W//2:]= np.clip(rng.normal(90, 35,(H//2,W//2)), 20,200).astype(np.uint8)
     return img, mask
 
+# ===========================================================================
+# ЧАСТЬ 7: ВИЗУАЛИЗАЦИЯ — 10 РИСУНКОВ
+# ===========================================================================
 
-# ---------------------------------------------------------------------------
-# ============================================================================
-# ЧАСТЬ 7: ВИЗУАЛИЗАЦИЯ — 10 ГРАФИКОВ
-# ============================================================================
-# ---------------------------------------------------------------------------
-
-PALETTE = {
-    2:  '#E63946',   # городская застройка — красный
-    3:  '#FF9F1C',   # промзона — оранжевый
-    11: '#2A9D8F',   # леса — зелёно-синий
-    14: '#8AC926',   # луга — салатовый
-}
-DEFAULT_COLORS = plt.cm.tab10.colors
-
-
-def _safe_label(class_id: int) -> str:
-    name = CLASS_NAMES.get(class_id, f'Класс {class_id}')
-    if len(name) > 22:
-        name = name[:20] + '…'
-    return f"C{class_id}: {name}"
-
-
-# --------------------------------------------------------------------------- GRAPH 1
-def plot_feature_correlation(dataset: np.ndarray, mask: np.ndarray,
-                              names: list, out_dir: str):
+# --------------------------------------------------------------------------- [1]
+def plot_feature_correlation(dataset, mask, names, out_dir):
     """
-    [График 1] Матрица корреляций Пирсона между признаками.
+    Рисунок 1. Матрица корреляций Пирсона признакового пространства.
 
-    Показывает, насколько линейно связаны признаки между собой.
-    Высокая корреляция (|r|→1) означает избыточность; Forward Selection
-    автоматически отсеивает такие признаки через критерий разделимости.
+    Показывает линейную зависимость между признаками на всей выборке
+    помеченных пикселей. Пары с |r| > 0.90 считаются избыточными
+    и могут быть исключены корреляционным фильтром перед Forward Selection.
     """
-    mask_flat = mask.flatten()
-    valid     = mask_flat > 0
-    X         = dataset.reshape(-1, dataset.shape[-1])[valid]
-
-    if X.shape[0] < 10:
-        print("  ⚠️  Недостаточно данных для матрицы корреляций")
-        return
+    X = dataset.reshape(-1, dataset.shape[-1])[mask.flatten() > 0]
+    if len(X) < 10:
+        print("  ⚠️  Мало данных — рисунок 1 пропущен"); return
 
     corr = np.corrcoef(X.T)
-
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(11, 9))
     im = ax.imshow(corr, cmap='RdBu_r', vmin=-1, vmax=1, aspect='auto')
-    plt.colorbar(im, ax=ax, label='Коэффициент корреляции Пирсона')
+    plt.colorbar(im, ax=ax, label='Коэффициент корреляции Пирсона r')
     ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=45, ha='right', fontsize=8)
     ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=8)
-    ax.set_title('График 1. Матрица корреляций признакового пространства\n'
-                 '(MultiSenGE, все классы)', fontsize=12, fontweight='bold')
 
-    # Аннотации для небольших матриц
-    if len(names) <= 12:
-        for i in range(len(names)):
-            for j in range(len(names)):
-                ax.text(j, i, f'{corr[i,j]:.2f}', ha='center', va='center',
-                        fontsize=6, color='black' if abs(corr[i,j]) < 0.6 else 'white')
+    # Пороговые линии |r| = 0.90
+    thresh = 0.90
+    mask_high = np.abs(corr) > thresh
+    for i in range(len(names)):
+        for j in range(len(names)):
+            if i != j:
+                val = corr[i, j]
+                color = 'white' if abs(val) > 0.5 else 'black'
+                ax.text(j, i, f'{val:.2f}', ha='center', va='center',
+                        fontsize=6.5, color=color,
+                        fontweight='bold' if abs(val) > thresh else 'normal')
+
+    ax.set_title(
+        'Рисунок 1. Матрица корреляций Пирсона признакового пространства\n'
+        f'(выделены пары с |r| > {thresh} — кандидаты на фильтрацию)',
+        fontsize=12, fontweight='bold', pad=12)
+
+    # Рамки вокруг высоко-коррелированных ячеек
+    for i in range(len(names)):
+        for j in range(len(names)):
+            if i != j and mask_high[i, j]:
+                ax.add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1,
+                             fill=False, edgecolor='gold', linewidth=1.5))
 
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_01_feature_correlation.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 1 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 1: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 2
-def plot_class_distributions(dataset: np.ndarray, mask: np.ndarray,
-                              names: list, out_dir: str,
-                              focus_features=('Mean', 'Std', 'Rho_Avg')):
+# --------------------------------------------------------------------------- [2]
+def plot_class_distributions(dataset, mask, names, out_dir,
+                              focus=('Mean', 'Std', 'Rho_Avg')):
     """
-    [График 2] Нормализованные гистограммы (KDE) ключевых признаков
-    для основных классов.
+    Рисунок 2. KDE-гистограммы распределений ключевых признаков по классам.
 
-    Позволяет визуально оценить разделимость классов по отдельным
-    признакам. Чем меньше перекрытие распределений, тем информативнее признак.
+    Чем меньше перекрытие распределений двух классов по признаку,
+    тем выше его информативность (тем больше расстояние Бхаттачарьи).
     """
+    from scipy.ndimage import gaussian_filter1d
     classes   = sorted(c for c in np.unique(mask) if c > 0)[:6]
-    mask_flat = mask.flatten()
+    flat      = mask.flatten()
     data_flat = dataset.reshape(-1, dataset.shape[-1])
+    avail     = [f for f in focus if f in names] or names[:3]
 
-    available = [f for f in focus_features if f in names]
-    if not available:
-        available = names[:3]
+    fig, axes = plt.subplots(1, len(avail), figsize=(5*len(avail), 5))
+    if len(avail) == 1: axes = [axes]
 
-    n_feat = len(available)
-    fig, axes = plt.subplots(1, n_feat, figsize=(5 * n_feat, 5))
-    if n_feat == 1:
-        axes = [axes]
-
-    for ax, feat_name in zip(axes, available):
-        idx = names.index(feat_name)
+    for ax, fname in zip(axes, avail):
+        idx = names.index(fname)
         for ci, cls in enumerate(classes):
-            pixels = data_flat[mask_flat == cls, idx]
-            if len(pixels) < 5:
-                continue
-            color = PALETTE.get(cls, DEFAULT_COLORS[ci % 10])
-            # KDE через гистограмму scipy
-            ax.hist(pixels, bins=50, density=True, alpha=0.45,
-                    color=color, label=_safe_label(cls), edgecolor='none')
-            # Smoothed line
-            from scipy.ndimage import gaussian_filter1d
-            counts, edges = np.histogram(pixels, bins=80, density=True)
-            centers = (edges[:-1] + edges[1:]) / 2
-            smooth  = gaussian_filter1d(counts, sigma=2)
-            ax.plot(centers, smooth, color=color, linewidth=2)
+            px = data_flat[flat == cls, idx]
+            if len(px) < 5: continue
+            col = PALETTE.get(cls, DEFAULT_COLORS[ci % 10])
+            cnts, edges = np.histogram(px, bins=60, density=True)
+            ctrs = (edges[:-1]+edges[1:])/2
+            ax.fill_between(ctrs, gaussian_filter1d(cnts, 2),
+                            alpha=0.30, color=col)
+            ax.plot(ctrs, gaussian_filter1d(cnts, 2),
+                    color=col, lw=2, label=_label(cls))
+        ax.set_title(f'Признак: {fname}', fontsize=10, fontweight='bold')
+        ax.set_xlabel('Значение'); ax.set_ylabel('Плотность вероятности')
+        ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 
-        ax.set_title(f'Признак: {feat_name}', fontsize=10, fontweight='bold')
-        ax.set_xlabel('Значение признака')
-        ax.set_ylabel('Плотность вероятности')
-        ax.legend(fontsize=7, loc='upper right')
-        ax.grid(True, alpha=0.3)
-
-    fig.suptitle('График 2. Распределения признаков по классам\n'
-                 '(нормализованные гистограммы + сглаживание)',
-                 fontsize=12, fontweight='bold')
+    fig.suptitle(
+        'Рисунок 2. Распределения ключевых признаков по классам\n'
+        '(сглаженные KDE-гистограммы)',
+        fontsize=12, fontweight='bold')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_02_class_distributions.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 2 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 2: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 3
-def plot_bhatta_heatmap(df_bhatta: pd.DataFrame, out_dir: str):
+# --------------------------------------------------------------------------- [3]
+def plot_bhatta_heatmap(df_bhatta, out_dir):
     """
-    [График 3] Тепловая карта попарных расстояний Бхаттачарьи.
+    Рисунок 3. Тепловая карта попарных расстояний Бхаттачарьи.
 
-    Более высокое значение → лучшая разделимость пары классов.
-    Значения NaN обозначают вырожденную ковариацию (недостаточно пикселей).
+    Более высокое значение D_B — лучшая разделимость пары классов.
+    Учитывает различие как в центрах, так и в форме ковариационных эллипсоидов.
     """
+    arr  = df_bhatta.values.copy().astype(float)
+    np.fill_diagonal(arr, np.nan)
+    data = pd.DataFrame(arr, index=df_bhatta.index, columns=df_bhatta.columns)
+
     fig, ax = plt.subplots(figsize=(9, 7))
-    data = df_bhatta.copy()
-    arr = data.values.copy(); np.fill_diagonal(arr, np.nan); data = pd.DataFrame(arr, index=data.index, columns=data.columns)
-
     sns.heatmap(data, ax=ax, cmap='YlOrRd', annot=True, fmt='.2f',
-                linewidths=0.5, linecolor='#ddd',
-                cbar_kws={'label': 'Расстояние Бхаттачарьи'})
-    ax.set_title('График 3. Попарные расстояния Бхаттачарьи между классами\n'
-                 '(полный признаковый набор)', fontsize=12, fontweight='bold')
+                linewidths=0.5, linecolor='#ccc',
+                cbar_kws={'label': 'Расстояние Бхаттачарьи D_B'})
+    ax.set_title(
+        'Рисунок 3. Попарные расстояния Бхаттачарьи между классами\n'
+        '(полный признаковый набор, диагональ = NaN)',
+        fontsize=12, fontweight='bold')
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_03_bhatta_heatmap.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 3 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 3: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 4
-def plot_maha_heatmap(df_maha: pd.DataFrame, out_dir: str):
+# --------------------------------------------------------------------------- [4]
+def plot_maha_heatmap(df_maha, out_dir):
     """
-    [График 4] Тепловая карта попарных расстояний Махаланобиса.
+    Рисунок 4. Тепловая карта попарных расстояний Махаланобиса.
 
-    В отличие от Бхаттачарьи учитывает только смещение центров классов,
-    нормируя его по усреднённой ковариации.
+    В отличие от D_B учитывает только смещение центров классов,
+    нормируя на усреднённую ковариацию. Сравнение рисунков 3 и 4
+    показывает, в каких парах форма распределений вносит вклад в разделимость.
     """
+    arr  = df_maha.values.copy().astype(float)
+    np.fill_diagonal(arr, np.nan)
+    data = pd.DataFrame(arr, index=df_maha.index, columns=df_maha.columns)
+
     fig, ax = plt.subplots(figsize=(9, 7))
-    data = df_maha.copy()
-    arr = data.values.copy(); np.fill_diagonal(arr, np.nan); data = pd.DataFrame(arr, index=data.index, columns=data.columns)
-
     sns.heatmap(data, ax=ax, cmap='Blues', annot=True, fmt='.2f',
-                linewidths=0.5, linecolor='#ddd',
-                cbar_kws={'label': 'Расстояние Махаланобиса'})
-    ax.set_title('График 4. Попарные расстояния Махаланобиса между классами\n'
-                 '(полный признаковый набор)', fontsize=12, fontweight='bold')
+                linewidths=0.5, linecolor='#ccc',
+                cbar_kws={'label': 'Расстояние Махаланобиса D_M'})
+    ax.set_title(
+        'Рисунок 4. Попарные расстояния Махаланобиса между классами\n'
+        '(полный признаковый набор, диагональ = NaN)',
+        fontsize=12, fontweight='bold')
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_04_maha_heatmap.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 4 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 4: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 5
-def plot_bhatta_forward_selection(history: list, selected_names: list, out_dir: str):
+# --------------------------------------------------------------------------- [5]
+def plot_bhatta_forward_selection(history, sel_names, out_dir):
     """
-    [График 5] Кривая жадного отбора признаков (Бхаттачарья).
+    Рисунок 5. Кривая Forward Selection по критерию Бхаттачарьи.
 
-    Показывает, как накопленное расстояние Бхаттачарьи растёт по мере
-    добавления каждого нового признака. «Колено» кривой указывает на
-    оптимальный размер подмножества признаков.
+    Левая ось — накопленное D_B, правая — прирост на каждом шаге.
+    «Колено» кривой указывает на оптимальный размер подмножества признаков.
     """
     if not history:
-        print("  ⚠️  История Бхаттачарья пуста — график 5 пропущен")
-        return
+        print("  ⚠️  Нет данных — рисунок 5 пропущен"); return
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    x = list(range(1, len(history) + 1))
-    ax.plot(x, history, marker='o', linewidth=2.5, markersize=8,
-            color='#E63946', markerfacecolor='white', markeredgewidth=2.5)
+    x = list(range(1, len(history)+1))
+    gains = [history[0]] + [history[i]-history[i-1] for i in range(1, len(history))]
 
-    # Подписи добавленных признаков
-    for i, (xi, yi, name) in enumerate(zip(x, history, selected_names)):
-        ax.annotate(name, xy=(xi, yi), xytext=(xi, yi + max(history)*0.04),
-                    ha='center', fontsize=8, rotation=20,
-                    arrowprops=dict(arrowstyle='-', color='gray', lw=0.8))
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    ax2 = ax1.twinx()
 
-    # Прирост на каждом шаге
-    ax2 = ax.twinx()
-    gains = [history[0]] + [history[i] - history[i-1] for i in range(1, len(history))]
-    ax2.bar(x, gains, alpha=0.25, color='#E63946', label='Прирост D_B')
-    ax2.set_ylabel('Прирост D_B', color='#E63946')
+    ax1.plot(x, history, marker='o', lw=2.5, ms=8, color='#E63946',
+             markerfacecolor='white', markeredgewidth=2.5, label='D_B (накопл.)', zorder=3)
+    ax2.bar(x, gains, alpha=0.22, color='#E63946', label='Прирост D_B')
+
+    for i, (xi, yi, nm) in enumerate(zip(x, history, sel_names)):
+        ax1.annotate(nm, xy=(xi, yi),
+                     xytext=(xi, yi + max(history)*0.05),
+                     ha='center', fontsize=8, rotation=25, color='#333',
+                     arrowprops=dict(arrowstyle='-', color='#aaa', lw=0.8))
+
+    ax1.set_xlabel('Количество признаков (шаг отбора)', fontsize=11)
+    ax1.set_ylabel('Накопленное расстояние Бхаттачарьи D_B', fontsize=11)
+    ax2.set_ylabel('Прирост D_B на шаге', color='#E63946', fontsize=10)
     ax2.tick_params(axis='y', labelcolor='#E63946')
+    ax1.set_xticks(x)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_title(
+        'Рисунок 5. Forward Selection по критерию Бхаттачарьи\n'
+        f'(пара классов {sel_names[0] if sel_names else "?"} — жадный алгоритм)',
+        fontsize=12, fontweight='bold')
 
-    ax.set_xlabel('Количество признаков (шаг отбора)')
-    ax.set_ylabel('Накопленное расстояние Бхаттачарьи D_B')
-    ax.set_title('График 5. Forward Selection по критерию Бхаттачарьи\n'
-                 '(жадный отбор, пара классов 2 и 11)', fontsize=12, fontweight='bold')
-    ax.set_xticks(x)
-    ax.grid(True, alpha=0.3)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1+lines2, labels1+labels2, fontsize=9, loc='lower right')
+
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_05_forward_bhatta.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 5 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 5: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 6
-def plot_ml_forward_selection(history: list, selected_names: list, out_dir: str):
+# --------------------------------------------------------------------------- [6]
+def plot_ml_forward_selection(history, sel_names, out_dir):
     """
-    [График 6] Кривая Forward Selection по точности kNN (5-fold CV).
+    Рисунок 6. Кривая Forward Selection по точности kNN (5-fold CV).
 
-    Позволяет сравнить с критерием Бхаттачарьи: оба метода должны
-    отбирать схожие по информативности признаки.
+    Сравнение с рисунком 5 позволяет оценить согласованность
+    статистического и ML-критериев отбора признаков.
     """
     if not history:
-        print("  ⚠️  История ML пуста — график 6 пропущен")
-        return
+        print("  ⚠️  Нет данных — рисунок 6 пропущен"); return
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    x = list(range(1, len(history) + 1))
-    ax.plot(x, [v * 100 for v in history], marker='s', linewidth=2.5,
-            markersize=8, color='#2A9D8F',
-            markerfacecolor='white', markeredgewidth=2.5, label='Accuracy (5-fold CV)')
+    x      = list(range(1, len(history)+1))
+    pct    = [v*100 for v in history]
+    gains  = [pct[0]] + [pct[i]-pct[i-1] for i in range(1, len(pct))]
 
-    for xi, yi, name in zip(x, history, selected_names):
-        ax.annotate(name, xy=(xi, yi*100),
-                    xytext=(xi, yi*100 + max(history)*3),
-                    ha='center', fontsize=8, rotation=20,
-                    arrowprops=dict(arrowstyle='-', color='gray', lw=0.8))
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    ax2 = ax1.twinx()
 
-    ax.set_xlabel('Количество признаков (шаг отбора)')
-    ax.set_ylabel('Точность классификации, %')
-    ax.set_title('График 6. Forward Selection по критерию kNN-Accuracy\n'
-                 '(5-fold CV, k=5, все классы маски)', fontsize=12, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_ylim(0, 105)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+    ax1.plot(x, pct, marker='s', lw=2.5, ms=8, color='#2A9D8F',
+             markerfacecolor='white', markeredgewidth=2.5, label='Accuracy (CV)', zorder=3)
+    ax2.bar(x, gains, alpha=0.22, color='#2A9D8F', label='Прирост Acc')
+
+    for xi, yi, nm in zip(x, pct, sel_names):
+        ax1.annotate(nm, xy=(xi, yi),
+                     xytext=(xi, yi + max(pct)*0.04),
+                     ha='center', fontsize=8, rotation=25, color='#333',
+                     arrowprops=dict(arrowstyle='-', color='#aaa', lw=0.8))
 
     # Зоны качества
-    ax.axhspan(90, 105, alpha=0.07, color='green', label='Отлично (>90%)')
-    ax.axhspan(70, 90,  alpha=0.07, color='yellow')
-    ax.axhspan(0,  70,  alpha=0.07, color='red')
+    ax1.axhspan(90, 105, alpha=0.06, color='green')
+    ax1.axhspan(70, 90,  alpha=0.06, color='yellow')
+    ax1.axhspan(0,  70,  alpha=0.06, color='red')
+    ax1.text(len(x)*0.98, 97,  '>90% — отлично',  ha='right', fontsize=8, color='darkgreen')
+    ax1.text(len(x)*0.98, 80,  '70–90% — хорошо', ha='right', fontsize=8, color='olive')
+    ax1.text(len(x)*0.98, 55,  '<70% — слабо',    ha='right', fontsize=8, color='red')
+
+    ax1.set_ylim(0, 108)
+    ax1.set_xlabel('Количество признаков (шаг отбора)', fontsize=11)
+    ax1.set_ylabel('Точность классификации, %', fontsize=11)
+    ax2.set_ylabel('Прирост точности, п.п.', color='#2A9D8F', fontsize=10)
+    ax2.tick_params(axis='y', labelcolor='#2A9D8F')
+    ax1.set_xticks(x)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_title(
+        'Рисунок 6. Forward Selection по точности kNN (5-fold CV, k=5)\n'
+        '(все классы маски, macro accuracy)',
+        fontsize=12, fontweight='bold')
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1+lines2, labels1+labels2, fontsize=9, loc='lower right')
 
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_06_forward_ml.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 6 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 6: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 7
-def plot_kde_ellipsoids(dataset: np.ndarray, mask: np.ndarray,
-                         names: list, out_dir: str,
-                         cls_pair=(2, 11)):
+# --------------------------------------------------------------------------- [7]
+def plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=(2,11)):
     """
-    [График 7] Совместное распределение двух классов (KDE-эллипсоиды).
+    Рисунок 7. KDE-эллипсоиды рассеяния двух классов (Mean vs Rho_Avg).
 
-    Пространство проекции: Mean (ось X) vs Std (или Rho_Avg) (ось Y).
     Форма контуров плотности отражает геометрию ковариационных эллипсоидов,
-    используемых в расстоянии Бхаттачарьи.
+    используемых в расстоянии Бхаттачарьи. Звёздочки — центроиды.
     """
-    mask_flat = mask.flatten()
+    from scipy.stats import gaussian_kde
+    flat      = mask.flatten()
     data_flat = dataset.reshape(-1, dataset.shape[-1])
-
-    feat_x = 'Mean'    if 'Mean'    in names else names[0]
-    feat_y = 'Rho_Avg' if 'Rho_Avg' in names else (names[1] if len(names) > 1 else names[0])
-    ix, iy = names.index(feat_x), names.index(feat_y)
+    fx = 'Mean'    if 'Mean'    in names else names[0]
+    fy = 'Rho_Avg' if 'Rho_Avg' in names else (names[1] if len(names)>1 else names[0])
+    ix, iy = names.index(fx), names.index(fy)
 
     fig, ax = plt.subplots(figsize=(8, 7))
-
     for cls in cls_pair:
-        pixels = data_flat[mask_flat == cls]
-        if len(pixels) < 5:
-            continue
-        color = PALETTE.get(cls, DEFAULT_COLORS[0])
-        xv, yv = pixels[:, ix], pixels[:, iy]
-
-        # Рисуем контуры плотности
-        from scipy.stats import gaussian_kde
+        px = data_flat[flat == cls]
+        if len(px) < 5: continue
+        col = PALETTE.get(cls, DEFAULT_COLORS[0])
+        xv, yv = px[:, ix], px[:, iy]
         try:
-            xy  = np.vstack([xv, yv])
-            kde = gaussian_kde(xy, bw_method=0.3)
-            xmin, xmax = xv.min(), xv.max()
-            ymin, ymax = yv.min(), yv.max()
-            xx, yy = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
-            z  = kde(np.vstack([xx.ravel(), yy.ravel()])).reshape(xx.shape)
-            ax.contourf(xx, yy, z, levels=5, alpha=0.30, colors=[color]*5)
-            ax.contour( xx, yy, z, levels=5, colors=[color], linewidths=1.5)
+            kde = gaussian_kde(np.vstack([xv, yv]), bw_method=0.3)
+            xg = np.linspace(xv.min(), xv.max(), 100)
+            yg = np.linspace(yv.min(), yv.max(), 100)
+            XX, YY = np.meshgrid(xg, yg)
+            Z = kde(np.vstack([XX.ravel(), YY.ravel()])).reshape(XX.shape)
+            ax.contourf(XX, YY, Z, levels=6, alpha=0.25, colors=[col]*6)
+            ax.contour( XX, YY, Z, levels=6, colors=[col], linewidths=1.5)
         except Exception:
-            ax.scatter(xv[::20], yv[::20], alpha=0.3, s=10, color=color)
+            ax.scatter(xv[::20], yv[::20], s=10, alpha=0.3, color=col)
+        ax.scatter(np.mean(xv), np.mean(yv), marker='*', s=250,
+                   color=col, edgecolors='black', zorder=5, label=_label(cls))
 
-        # Центроид
-        ax.scatter(np.mean(xv), np.mean(yv), marker='*', s=200,
-                   color=color, edgecolors='black', zorder=5,
-                   label=_safe_label(cls))
-
-    ax.set_xlabel(f'Признак: {feat_x}', fontsize=11)
-    ax.set_ylabel(f'Признак: {feat_y}', fontsize=11)
-    ax.set_title('График 7. KDE-эллипсоиды рассеяния для двух классов\n'
-                 f'(проекция: {feat_x} vs {feat_y})', fontsize=12, fontweight='bold')
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel(f'Признак: {fx}', fontsize=11)
+    ax.set_ylabel(f'Признак: {fy}', fontsize=11)
+    ax.set_title(
+        f'Рисунок 7. KDE-эллипсоиды рассеяния классов\n'
+        f'(проекция: {fx} vs {fy}, ★ — центроид)',
+        fontsize=12, fontweight='bold')
+    ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_07_kde_ellipsoids.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 7 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 7: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 8
-def plot_feature_histograms(dataset: np.ndarray, mask: np.ndarray,
-                             names: list, out_dir: str,
-                             cls_pair=(2, 11)):
+# --------------------------------------------------------------------------- [8]
+def plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=(2,11)):
     """
-    [График 8] Гистограммы всех признаков для пары классов.
+    Рисунок 8. Гистограммы всех признаков для пары классов.
 
-    Сравниваются распределения для каждого признака отдельно.
-    Площадь пересечения гистограмм ~= вероятность ошибки классификации
-    по одному признаку.
+    Площадь пересечения гистограмм ≈ вероятность ошибки классификации
+    по одному признаку (байесовская граница Байеса).
     """
-    mask_flat = mask.flatten()
+    flat      = mask.flatten()
     data_flat = dataset.reshape(-1, dataset.shape[-1])
     c         = len(names)
     cols      = 4
     rows      = (c + cols - 1) // cols
 
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*3.2))
     axes = axes.flatten()
 
-    for i, feat_name in enumerate(names):
+    for i, fname in enumerate(names):
         ax = axes[i]
         for cls in cls_pair:
-            pixels = data_flat[mask_flat == cls, i]
-            if len(pixels) < 5:
-                continue
-            color = PALETTE.get(cls, DEFAULT_COLORS[0])
-            ax.hist(pixels, bins=40, density=True, alpha=0.5, color=color,
-                    label=f'C{cls}', edgecolor='none')
-        ax.set_title(feat_name, fontsize=9, fontweight='bold')
+            px  = data_flat[flat == cls, i]
+            if len(px) < 5: continue
+            col = PALETTE.get(cls, DEFAULT_COLORS[0])
+            ax.hist(px, bins=45, density=True, alpha=0.50,
+                    color=col, label=f'C{cls}', edgecolor='none')
+        ax.set_title(fname, fontsize=9, fontweight='bold')
         ax.set_xlabel('Значение', fontsize=7)
         ax.set_ylabel('Плотность', fontsize=7)
         ax.tick_params(labelsize=7)
-        ax.legend(fontsize=7)
-        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 
-    # Скрываем лишние оси
-    for j in range(i + 1, len(axes)):
+    for j in range(i+1, len(axes)):
         axes[j].axis('off')
 
-    fig.suptitle(f'График 8. Гистограммы признаков для классов {cls_pair[0]} и {cls_pair[1]}\n'
-                 f'(C{cls_pair[0]}: {CLASS_NAMES.get(cls_pair[0],"?")} | '
-                 f'C{cls_pair[1]}: {CLASS_NAMES.get(cls_pair[1],"?")})',
-                 fontsize=12, fontweight='bold')
+    fig.suptitle(
+        f'Рисунок 8. Гистограммы признаков для классов C{cls_pair[0]} и C{cls_pair[1]}\n'
+        f'({CLASS_NAMES.get(cls_pair[0],"?")} | {CLASS_NAMES.get(cls_pair[1],"?")})',
+        fontsize=12, fontweight='bold')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_08_feature_histograms.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 8 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 8: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 9
-def plot_boxplot_by_class(dataset: np.ndarray, mask: np.ndarray,
-                           names: list, out_dir: str,
-                           max_classes: int = 6):
+# --------------------------------------------------------------------------- [9]
+def plot_boxplot_by_class(dataset, mask, names, out_dir, max_cls=6):
     """
-    [График 9] Box-plot (ящики с усами) нормализованных признаков по классам.
+    Рисунок 9. Box-plot нормализованных признаков по всем классам.
 
-    Позволяет сравнить медиану и разброс каждого признака сразу для
-    всех классов. Признаки нормализованы в [0,1] для сопоставимости.
+    Признаки нормированы в [0,1] для сопоставимости. Показывает медиану,
+    IQR и выбросы — полезно для оценки межклассовых различий одновременно
+    по всем признакам.
     """
-    mask_flat = mask.flatten()
-    data_flat = dataset.reshape(-1, dataset.shape[-1])
-    classes   = sorted(c for c in np.unique(mask) if c > 0)[:max_classes]
+    flat      = mask.flatten()
+    data_flat = dataset.reshape(-1, dataset.shape[-1]).astype(np.float64)
+    classes   = sorted(c for c in np.unique(mask) if c > 0)[:max_cls]
 
-    # Нормализация [0, 1]
-    Xn = data_flat.copy().astype(np.float64)
-    for i in range(Xn.shape[1]):
-        mn, mx = Xn[:, i].min(), Xn[:, i].max()
-        if mx > mn:
-            Xn[:, i] = (Xn[:, i] - mn) / (mx - mn)
+    # Нормализация [0,1]
+    for i in range(data_flat.shape[1]):
+        mn,mx = data_flat[:,i].min(), data_flat[:,i].max()
+        if mx>mn: data_flat[:,i] = (data_flat[:,i]-mn)/(mx-mn)
 
     n_feat = len(names)
     cols   = 2
     rows   = (n_feat + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 7, rows * 3.5))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*7, rows*3.5))
     axes = axes.flatten()
 
-    for i, feat_name in enumerate(names):
-        ax    = axes[i]
-        data_groups = []
-        labels_bp   = []
-        colors_bp   = []
+    for i, fname in enumerate(names):
+        ax = axes[i]
+        groups, lbls, cols_bp = [], [], []
         for cls in classes:
-            pixels = Xn[mask_flat == cls, i]
-            if len(pixels) < 5:
-                continue
-            data_groups.append(pixels)
-            labels_bp.append(f'C{cls}')
-            colors_bp.append(PALETTE.get(cls, DEFAULT_COLORS[classes.index(cls) % 10]))
+            px = data_flat[flat == cls, i]
+            if len(px)<5: continue
+            groups.append(px); lbls.append(f'C{cls}')
+            cols_bp.append(PALETTE.get(cls, DEFAULT_COLORS[classes.index(cls)%10]))
 
-        bp = ax.boxplot(data_groups, patch_artist=True,
-                        notch=False, vert=True, widths=0.5,
-                        medianprops=dict(color='black', linewidth=2))
-        for patch, color in zip(bp['boxes'], colors_bp):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.6)
-
-        ax.set_xticks(range(1, len(labels_bp) + 1))
-        ax.set_xticklabels(labels_bp, fontsize=8)
-        ax.set_title(feat_name, fontsize=9, fontweight='bold')
+        bp = ax.boxplot(groups, patch_artist=True, notch=False, widths=0.5,
+                        medianprops=dict(color='black', lw=2))
+        for patch, col in zip(bp['boxes'], cols_bp):
+            patch.set_facecolor(col); patch.set_alpha(0.6)
+        ax.set_xticks(range(1, len(lbls)+1)); ax.set_xticklabels(lbls, fontsize=8)
+        ax.set_title(fname, fontsize=9, fontweight='bold')
         ax.set_ylabel('Норм. значение [0,1]', fontsize=8)
         ax.grid(True, alpha=0.3, axis='y')
 
-    for j in range(i + 1, len(axes)):
+    for j in range(i+1, len(axes)):
         axes[j].axis('off')
 
-    fig.suptitle('График 9. Box-plot нормализованных признаков по классам\n'
-                 '(медиана, IQR, выбросы)', fontsize=12, fontweight='bold')
+    fig.suptitle(
+        'Рисунок 9. Box-plot нормализованных признаков по классам\n'
+        '(медиана, IQR, выбросы — все классы маски)',
+        fontsize=12, fontweight='bold')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_09_boxplot_classes.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 9 сохранён: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 9: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- GRAPH 10
-def plot_selected_feature_map(dataset: np.ndarray, mask: np.ndarray,
-                               names: list, selected_indices: list,
-                               out_dir: str, max_maps: int = 4):
+# --------------------------------------------------------------------------- [10]
+def plot_comparison_table(names, sel_bhatta, hist_bhatta,
+                           sel_ml, hist_ml, out_dir):
     """
-    [График 10] Псевдоцветная карта отобранных признаков на снимке.
+    Рисунок 10. Сравнительная таблица методов отбора признаков.
 
-    Отображает пространственное распределение информативных признаков
-    совместно с эталонной маской классов.
+    Итоговый рисунок курсовой: сопоставляет результаты статистического
+    (Бхаттачарья) и ML (kNN) методов — какие признаки отобраны каждым,
+    их ранг, накопленный критерий и признаки-«победители» обоих методов.
     """
-    if not selected_indices:
-        print("  ⚠️  Нет отобранных признаков — график 10 пропущен")
-        return
+    n_bhatta = len(sel_bhatta)
+    n_ml     = len(sel_ml)
+    n_rows   = max(n_bhatta, n_ml, 1)
 
-    idxs  = selected_indices[:max_maps]
-    n     = len(idxs)
-    fig, axes = plt.subplots(1, n + 1, figsize=((n + 1) * 5, 5))
+    common = set(names[i] for i in sel_bhatta) & set(names[i] for i in sel_ml)
 
-    # Маска классов
-    classes = sorted(c for c in np.unique(mask) if c > 0)
-    cmap_mask = plt.cm.get_cmap('tab10', len(classes) + 1)
-    axes[0].imshow(mask, cmap=cmap_mask, interpolation='nearest')
-    axes[0].set_title('Эталонная маска\n(Ground Reference)', fontsize=10, fontweight='bold')
-    axes[0].axis('off')
+    fig = plt.figure(figsize=(14, 2.2 + n_rows * 0.55))
+    gs  = fig.add_gridspec(1, 3, wspace=0.08,
+                           left=0.03, right=0.97, top=0.82, bottom=0.08)
 
-    for j, idx in enumerate(idxs):
-        ax   = axes[j + 1]
-        feat = dataset[:, :, idx]
-        im   = ax.imshow(feat, cmap='viridis', interpolation='nearest')
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        ax.set_title(f'Признак: {names[idx]}\n(ранг {j+1})', fontsize=10, fontweight='bold')
-        ax.axis('off')
+    # --- Левая таблица: Бхаттачарья ---
+    ax_b = fig.add_subplot(gs[0])
+    ax_b.axis('off')
+    rows_b = [['Ранг', 'Признак', 'D_B накопл.']]
+    for rank, idx in enumerate(sel_bhatta, 1):
+        d   = f'{hist_bhatta[rank-1]:.3f}' if rank-1 < len(hist_bhatta) else '—'
+        nm  = names[idx]
+        rows_b.append([str(rank), nm, d])
+    if not sel_bhatta:
+        rows_b.append(['—', 'нет данных', '—'])
 
-    fig.suptitle('График 10. Пространственное распределение отобранных признаков\n'
-                 '(результат Forward Selection)', fontsize=12, fontweight='bold')
-    plt.tight_layout()
-    path = os.path.join(out_dir, 'graph_10_feature_maps.png')
-    plt.savefig(path, dpi=150); plt.close()
-    print(f"  ✅ График 10 сохранён: {os.path.basename(path)}")
+    t_b = ax_b.table(cellText=rows_b[1:], colLabels=rows_b[0],
+                     cellLoc='center', loc='center')
+    t_b.auto_set_font_size(False); t_b.set_fontsize(9)
+    t_b.scale(1, 1.4)
+    # Заголовок столбцов
+    for j in range(3):
+        t_b[(0,j)].set_facecolor('#E63946')
+        t_b[(0,j)].set_text_props(color='white', fontweight='bold')
+    # Подсветка общих
+    for rank, idx in enumerate(sel_bhatta, 1):
+        if names[idx] in common:
+            for j in range(3):
+                t_b[(rank, j)].set_facecolor('#FFE8A1')
+    ax_b.set_title('Метод 1: Бхаттачарья\n(статистический)', fontsize=10,
+                   fontweight='bold', color='#E63946', pad=6)
 
+    # --- Средняя таблица: пересечение ---
+    ax_c = fig.add_subplot(gs[1])
+    ax_c.axis('off')
+    rows_c = [['Общие признаки', 'Бхаттачарья ранг', 'kNN ранг']]
+    for nm in sorted(common):
+        rb = next((r+1 for r,i in enumerate(sel_bhatta) if names[i]==nm), '—')
+        rm = next((r+1 for r,i in enumerate(sel_ml)     if names[i]==nm), '—')
+        rows_c.append([nm, str(rb), str(rm)])
+    if not common:
+        rows_c.append(['нет пересечений', '—', '—'])
 
-# ---------------------------------------------------------------------------
-# ============================================================================
+    t_c = ax_c.table(cellText=rows_c[1:], colLabels=rows_c[0],
+                     cellLoc='center', loc='center')
+    t_c.auto_set_font_size(False); t_c.set_fontsize(9)
+    t_c.scale(1, 1.4)
+    for j in range(3):
+        t_c[(0,j)].set_facecolor('#2A9D8F')
+        t_c[(0,j)].set_text_props(color='white', fontweight='bold')
+    for r in range(1, len(rows_c)):
+        for j in range(3):
+            t_c[(r,j)].set_facecolor('#D4F1EE')
+    ax_c.set_title('Совпадение методов\n(★ лучшие признаки)', fontsize=10,
+                   fontweight='bold', color='#2A9D8F', pad=6)
+
+    # --- Правая таблица: kNN ---
+    ax_m = fig.add_subplot(gs[2])
+    ax_m.axis('off')
+    rows_m = [['Ранг', 'Признак', 'Accuracy %']]
+    for rank, idx in enumerate(sel_ml, 1):
+        a   = f'{hist_ml[rank-1]*100:.1f}%' if rank-1 < len(hist_ml) else '—'
+        nm  = names[idx]
+        rows_m.append([str(rank), nm, a])
+    if not sel_ml:
+        rows_m.append(['—', 'нет данных', '—'])
+
+    t_m = ax_m.table(cellText=rows_m[1:], colLabels=rows_m[0],
+                     cellLoc='center', loc='center')
+    t_m.auto_set_font_size(False); t_m.set_fontsize(9)
+    t_m.scale(1, 1.4)
+    for j in range(3):
+        t_m[(0,j)].set_facecolor('#3A86FF')
+        t_m[(0,j)].set_text_props(color='white', fontweight='bold')
+    for rank, idx in enumerate(sel_ml, 1):
+        if names[idx] in common:
+            for j in range(3):
+                t_m[(rank, j)].set_facecolor('#FFE8A1')
+    ax_m.set_title('Метод 2: kNN (5-fold CV)\n(ML-критерий)', fontsize=10,
+                   fontweight='bold', color='#3A86FF', pad=6)
+
+    fig.suptitle(
+        'Рисунок 10. Сравнительная таблица результатов отбора признаков\n'
+        '(выделены жёлтым: признаки, отобранные обоими методами)',
+        fontsize=13, fontweight='bold', y=0.97)
+
+    path = os.path.join(out_dir, 'graph_10_comparison_table.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  ✅ Рисунок 10: {os.path.basename(path)}")
+
+# ===========================================================================
 # ЧАСТЬ 8: ГЛАВНЫЙ ПАЙПЛАЙН
-# ============================================================================
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def main():
     """
-    Основная функция — запускает полный пайплайн:
-
-    1. Загрузка / генерация данных
-    2. Вычисление признакового пространства
-    3. Статистический анализ классов (Махаланобис, Бхаттачарья)
-    4. Forward Selection (статистический и ML)
-    5. Построение 10 графиков
-    6. Вывод итоговых таблиц
+    Полный Multi-Patch пайплайн курсовой работы (MultiSenGE):
+      1. Загрузка нескольких случайных патчей (или демо-данных)
+      2. Вычисление признакового пространства для каждого патча
+      3. Объединение пикселей всех патчей в единую статистическую выборку
+      4. Субдискретизация до MAX_PIXELS_TOTAL
+      5. Статистический анализ (Махаланобис + Бхаттачарья)
+      6. Forward Selection — Бхаттачарья (пара классов 2↔11)
+      7. Forward Selection — kNN 5-fold CV (все классы)
+      8. Построение 10 рисунков
+      9. Итоговый отчёт в консоль
     """
     print("=" * 70)
     print("  Курсовая работа: Статистические методы отбора признаков")
     print("  при классификации космических изображений (MultiSenGE)")
+    print(f"  Режим: Multi-Patch ({N_PATCHES} патчей, seed={RANDOM_SEED})")
     print("=" * 70)
 
-    # -----------------------------------------------------------------------
-    # Директории вывода
-    # -----------------------------------------------------------------------
+    # Директории
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir      = os.path.join(project_root, 'output')
     os.makedirs(out_dir, exist_ok=True)
-    print(f"\n📁 Графики будут сохранены в: {out_dir}")
+    print(f"\n📁 Графики → {out_dir}")
 
-    # -----------------------------------------------------------------------
-    # Шаг 1. Загрузка данных
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # ШАГ 1: Загрузка / генерация данных
+    # -------------------------------------------------------------------
     print("\n" + "─" * 60)
     print("ШАГ 1: Загрузка данных")
     print("─" * 60)
 
-    img_path, mask_path = None, None
+    X_global = None
+    y_global = None
+    names    = None
 
+    use_demo  = True
+
+    # --- Попытка загрузить реальные патчи ---
     if HAS_RASTERIO:
-        img_path, mask_path = auto_find_data(project_root)
+        data_dir = os.path.join(project_root, 'data')
+        lists_dir = os.path.join(project_root, 'lists')
 
-    if img_path and mask_path and HAS_RASTERIO:
-        print(f"  Снимок:  {os.path.basename(img_path)}")
-        print(f"  Маска:   {os.path.basename(mask_path)}")
-        try:
-            with rasterio.open(mask_path) as src:
-                mask = src.read(1).astype(np.uint8)
-            with rasterio.open(img_path) as src:
-                img_data = src.read().astype(np.float32)
+        # Проверяем наличие файлов-списков
+        has_lists = (
+            os.path.isfile(os.path.join(lists_dir, 'out_s2_pref.txt')) and
+            os.path.isfile(os.path.join(lists_dir, 'out_gr_pref.txt'))
+        )
 
-            # Если многоканальный — берём среднее для одноканальной обработки
-            if img_data.ndim == 3 and img_data.shape[0] > 1:
-                img_gray = np.mean(img_data, axis=0)
-            else:
-                img_gray = img_data.squeeze()
+        if has_lists:
+            try:
+                pairs = select_random_pairs(n_patches=N_PATCHES, seed=RANDOM_SEED)
 
-            # Нормализация 0–255
-            mn, mx = img_gray.min(), img_gray.max()
-            img_norm = ((img_gray - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
+                for patch_idx, (s2_name, gr_name) in enumerate(pairs, 1):
+                    print(f"\n  Патч {patch_idx}/{len(pairs)}: {s2_name}")
+                    try:
+                        raw_img, patch_mask = load_pair(s2_name, gr_name, data_dir)
 
-            if mask.shape != img_norm.shape:
-                mask = zoom(mask,
-                            (img_norm.shape[0] / mask.shape[0],
-                             img_norm.shape[1] / mask.shape[1]),
-                            order=0).astype(np.uint8)
-            use_demo = False
-        except Exception as e:
-            print(f"  ❌ Ошибка загрузки: {e}. Переключаюсь на демо-данные.")
-            use_demo = True
-    else:
-        use_demo = True
+                        # Нормализация
+                        if raw_img.ndim == 3 and USE_MULTISPECTRAL:
+                            # Мультиспектральный режим — передаём (C,H,W) → (H,W,C)
+                            img_input = np.moveaxis(raw_img, 0, -1)  # (H,W,C)
+                            # Нормируем каждый канал
+                            for ch in range(img_input.shape[-1]):
+                                mn, mx = img_input[:,:,ch].min(), img_input[:,:,ch].max()
+                                img_input[:,:,ch] = (img_input[:,:,ch] - mn) / (mx - mn + 1e-8) * 255
+                            img_input = img_input.astype(np.float32)
+                            feat_dict = extract_all_features(img_input, window_size=WINDOW_SIZE,
+                                                             is_multispectral=True)
+                        else:
+                            gray = np.mean(raw_img, axis=0) if raw_img.ndim == 3 else raw_img.squeeze()
+                            mn, mx = gray.min(), gray.max()
+                            img_norm = ((gray - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
+                            feat_dict = extract_all_features(img_norm, window_size=WINDOW_SIZE,
+                                                             is_multispectral=False)
 
+                        cube, patch_names = make_feature_sandwich(feat_dict)
+
+                        # Выравниваем маску по размеру куба, если нужно
+                        if patch_mask.shape != cube.shape[:2]:
+                            patch_mask = zoom(
+                                patch_mask,
+                                (cube.shape[0] / patch_mask.shape[0],
+                                 cube.shape[1] / patch_mask.shape[1]),
+                                order=0
+                            ).astype(np.uint8)
+
+                        X_patch, y_patch = build_global_dataset(cube, patch_mask)
+
+                        if names is None:
+                            names = patch_names
+
+                        if X_global is None:
+                            X_global = X_patch
+                            y_global = y_patch
+                        else:
+                            X_global = np.vstack([X_global, X_patch])
+                            y_global = np.concatenate([y_global, y_patch])
+
+                        print(f"    ✅ +{len(X_patch):,} пкс | итого: {len(X_global):,}")
+
+                    except Exception as e:
+                        print(f"    ⚠️  Ошибка патча {s2_name}: {e}")
+
+                if X_global is not None and len(X_global) > 100:
+                    use_demo = False
+                    print(f"\n  ✅ Загружено {len(pairs)} патчей: {len(X_global):,} пикселей")
+
+            except Exception as e:
+                print(f"  ⚠️  Ошибка загрузки патчей: {e}. Переключаюсь на демо-данные.")
+
+        else:
+            # Пробуем найти хотя бы один .tif
+            img_path, mask_path = auto_find_data(project_root)
+            if img_path and mask_path:
+                print(f"  Одиночный снимок:  {os.path.basename(img_path)}")
+                try:
+                    with rasterio.open(mask_path) as s: patch_mask = s.read(1).astype(np.uint8)
+                    with rasterio.open(img_path)  as s: raw = s.read().astype(np.float32)
+                    gray = np.mean(raw, axis=0) if raw.ndim == 3 else raw.squeeze()
+                    mn, mx = gray.min(), gray.max()
+                    img_norm = ((gray - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
+                    if patch_mask.shape != img_norm.shape:
+                        patch_mask = zoom(
+                            patch_mask,
+                            (img_norm.shape[0] / patch_mask.shape[0],
+                             img_norm.shape[1] / patch_mask.shape[1]),
+                            order=0
+                        ).astype(np.uint8)
+                    feat_dict = extract_all_features(img_norm, window_size=WINDOW_SIZE,
+                                                     is_multispectral=False)
+                    cube, names = make_feature_sandwich(feat_dict)
+                    X_global, y_global = build_global_dataset(cube, patch_mask)
+                    use_demo = False
+                    print(f"  ✅ Одиночный патч: {len(X_global):,} пикселей")
+                except Exception as e:
+                    print(f"  ❌ Ошибка: {e}. Переключаюсь на демо-данные.")
+
+    # --- Демо-режим ---
     if use_demo:
-        print("  🎲 Генерация синтетических данных (256×256)...")
-        img_norm, mask = _generate_synthetic_data()
-        print(f"  Размер снимка: {img_norm.shape}, Маска: {mask.shape}")
+        print("  🎲 Генерация синтетических данных (Multi-Patch демо, 4×256×256)...")
+        X_parts, y_parts = [], []
+        for seed_offset in range(N_PATCHES):
+            img_norm, patch_mask = _generate_synthetic_data(
+                H=256, W=256, seed=RANDOM_SEED + seed_offset
+            )
+            feat_dict = extract_all_features(img_norm, window_size=WINDOW_SIZE,
+                                             is_multispectral=False)
+            cube, names = make_feature_sandwich(feat_dict)
+            X_p, y_p = build_global_dataset(cube, patch_mask)
+            X_parts.append(X_p)
+            y_parts.append(y_p)
 
-    unique_cls = np.unique(mask)
+        X_global = np.vstack(X_parts)
+        y_global = np.concatenate(y_parts)
+        print(f"  ✅ Синтетика: {N_PATCHES} патчей, {len(X_global):,} пикселей")
+
+    # -------------------------------------------------------------------
+    # ШАГ 2: Субдискретизация
+    # -------------------------------------------------------------------
+    print("\n" + "─" * 60)
+    print(f"ШАГ 2: Субдискретизация (лимит {MAX_PIXELS_TOTAL:,} пкс)")
+    print("─" * 60)
+    X_global, y_global = subsample_dataset(X_global, y_global,
+                                            max_samples=MAX_PIXELS_TOTAL,
+                                            seed=RANDOM_SEED)
+    print(f"  📊 Итоговая выборка: {len(X_global):,} пикселей, {len(names)} признаков")
+
+    unique_cls = np.unique(y_global)
     unique_cls = unique_cls[unique_cls > 0]
-    print(f"  Классы в маске: {unique_cls.tolist()}")
+    print(f"  Классы в выборке: {unique_cls.tolist()}")
 
-    # -----------------------------------------------------------------------
-    # Шаг 2. Вычисление признакового пространства
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # Восстанавливаем псевдо-куб для совместимости с функциями графиков
+    # -------------------------------------------------------------------
+    dataset, mask = rebuild_feature_cube(X_global, y_global)
+
+    # -------------------------------------------------------------------
+    # ШАГ 3: Статистический анализ
+    # -------------------------------------------------------------------
     print("\n" + "─" * 60)
-    print("ШАГ 2: Вычисление признаков (окно 15×15)")
+    print("ШАГ 3: Расстояния Махаланобиса и Бхаттачарьи")
     print("─" * 60)
-
-    feat_dict = extract_all_features(img_norm, window_size=15, is_multispectral=False)
-    dataset, names = make_feature_sandwich(feat_dict)
-    print(f"\n  📦 Признаковый куб: {dataset.shape}")
-    print(f"  📋 Признаки ({len(names)}): {names}")
-
-    # -----------------------------------------------------------------------
-    # Шаг 3. Статистический анализ классов
-    # -----------------------------------------------------------------------
-    print("\n" + "─" * 60)
-    print("ШАГ 3: Анализ классов — расстояния Махаланобиса и Бхаттачарьи")
-    print("─" * 60)
-
     stats = {}
     for cls in unique_cls:
-        mean_v, cov_m = calculate_class_stats(dataset, mask, int(cls))
-        if mean_v is not None:
-            stats[int(cls)] = {'mean': mean_v, 'cov': cov_m}
+        mv, cm = calculate_class_stats(dataset, mask, int(cls))
+        if mv is not None:
+            stats[int(cls)] = {'mean': mv, 'cov': cm}
 
     classes_list = sorted(stats.keys())
-    print(f"\n  Классов обработано: {len(classes_list)}")
-
     df_maha, df_bhatt = compute_all_pairwise_distances(stats, classes_list)
+    print("\n  Расстояния Бхаттачарьи:"); print(df_bhatt.round(3).to_string())
+    print("\n  Расстояния Махаланобиса:"); print(df_maha.round(3).to_string())
 
-    # Текстовый отчёт
-    print("\n  Попарные расстояния (Бхаттачарья):")
-    print(df_bhatt.round(3).to_string())
-    print("\n  Попарные расстояния (Махаланобис):")
-    print(df_maha.round(3).to_string())
-
-    # -----------------------------------------------------------------------
-    # Шаг 4. Forward Selection — Бхаттачарья
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # ШАГ 4: Forward Selection — Бхаттачарья
+    # -------------------------------------------------------------------
     print("\n" + "─" * 60)
-    print("ШАГ 4: Forward Selection по критерию Бхаттачарьи (пара 2↔11)")
+    print("ШАГ 4: Forward Selection — Бхаттачарья")
     print("─" * 60)
-
-    # Выбираем пару классов: 2 и 11 (если есть), иначе — первые два
+    pair = None
     if 2 in unique_cls and 11 in unique_cls:
         pair = (2, 11)
     elif len(unique_cls) >= 2:
         pair = (int(unique_cls[0]), int(unique_cls[1]))
-    else:
-        pair = None
 
-    sel_bhatta, hist_bhatta = [], []
+    sel_b, hist_b = [], []
     if pair:
-        sel_bhatta, hist_bhatta = forward_selection_bhatta(
-            dataset, mask, target_classes=pair, eps=0.001, max_features=10)
-        sel_bhatta_names = [names[i] for i in sel_bhatta]
-        print(f"\n  🏆 Отобрано признаков (Бхаттачарья): {sel_bhatta_names}")
-    else:
-        sel_bhatta_names = []
-        print("  ⚠️  Недостаточно классов для Бхаттачарья-отбора")
+        sel_b, hist_b = forward_selection_bhatta(
+            dataset, mask, pair, eps=0.001, max_features=10
+        )
+        print(f"\n  🏆 Бхаттачарья: {[names[i] for i in sel_b]}")
 
-    # -----------------------------------------------------------------------
-    # Шаг 5. Forward Selection — ML (kNN)
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # ШАГ 5: Forward Selection — kNN
+    # -------------------------------------------------------------------
     print("\n" + "─" * 60)
-    print("ШАГ 5: Forward Selection по точности kNN (5-fold CV)")
+    print("ШАГ 5: Forward Selection — kNN (5-fold CV)")
+    print("─" * 60)
+    sel_m, hist_m = forward_selection_ml(
+        dataset, mask,
+        target_classes=[int(c) for c in unique_cls],
+        eps=0.001, max_features=10
+    )
+    print(f"\n  🏆 kNN: {[names[i] for i in sel_m]}")
+
+    # -------------------------------------------------------------------
+    # ШАГ 6: Построение рисунков
+    # -------------------------------------------------------------------
+    print("\n" + "─" * 60)
+    print("ШАГ 6: Построение рисунков (1–10)")
     print("─" * 60)
 
-    target_cls_ml = [int(c) for c in unique_cls if c > 0]
-    sel_ml, hist_ml = forward_selection_ml(
-        dataset, mask, target_classes=target_cls_ml,
-        eps=0.001, max_features=10)
-    sel_ml_names = [names[i] for i in sel_ml]
-    print(f"\n  🏆 Отобрано признаков (kNN): {sel_ml_names}")
-
-    # -----------------------------------------------------------------------
-    # Шаг 6. Визуализация (10 графиков)
-    # -----------------------------------------------------------------------
-    print("\n" + "─" * 60)
-    print("ШАГ 6: Построение графиков")
-    print("─" * 60)
+    clsp = pair if pair else (int(unique_cls[0]), int(unique_cls[0]))
 
     plot_feature_correlation(dataset, mask, names, out_dir)
     plot_class_distributions(dataset, mask, names, out_dir)
     plot_bhatta_heatmap(df_bhatt, out_dir)
     plot_maha_heatmap(df_maha, out_dir)
-    plot_bhatta_forward_selection(hist_bhatta, sel_bhatta_names, out_dir)
-    plot_ml_forward_selection(hist_ml, sel_ml_names, out_dir)
-    plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=pair if pair else (int(unique_cls[0]), int(unique_cls[0])))
-    plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=pair if pair else (int(unique_cls[0]), int(unique_cls[0])))
+    plot_bhatta_forward_selection(hist_b, [names[i] for i in sel_b], out_dir)
+    plot_ml_forward_selection(hist_m, [names[i] for i in sel_m], out_dir)
+    plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=clsp)
+    plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=clsp)
     plot_boxplot_by_class(dataset, mask, names, out_dir)
-    plot_selected_feature_map(dataset, mask, names, sel_bhatta if sel_bhatta else sel_ml, out_dir)
+    plot_comparison_table(names, sel_b, hist_b, sel_m, hist_m, out_dir)
 
-    # -----------------------------------------------------------------------
-    # Итоговый отчёт в консоль
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # ИТОГОВЫЙ ОТЧЁТ
+    # -------------------------------------------------------------------
     print("\n" + "=" * 70)
     print("ИТОГОВЫЙ ОТЧЁТ")
     print("=" * 70)
+    print(f"\n  Количество патчей     : {N_PATCHES}")
+    print(f"  Признаков всего       : {len(names)}")
+    print(f"  Объём выборки         : {len(X_global):,}")
+    print(f"  Классов в выборке     : {len(classes_list)}")
 
-    print(f"\n📐 Признаковое пространство:")
-    print(f"   Всего признаков:    {len(names)}")
-    print(f"   Размер куба:        {dataset.shape}")
-    print(f"   Классов в маске:    {len(classes_list)}")
+    if sel_b:
+        print(f"\n  Forward Selection (Бхаттачарья), классы {pair}:")
+        for r, i in enumerate(sel_b, 1):
+            d = f'{hist_b[r-1]:.4f}' if r-1 < len(hist_b) else '—'
+            print(f"    {r}. {names[i]:<18s}  D_B = {d}")
 
-    if sel_bhatta_names:
-        print(f"\n📊 Forward Selection (Бхаттачарья) — классы {pair}:")
-        for rank, name in enumerate(sel_bhatta_names, 1):
-            d = hist_bhatta[rank-1] if rank-1 < len(hist_bhatta) else '—'
-            print(f"   {rank}. {name:<18s}  D_B = {d:.4f}" if isinstance(d, float) else f"   {rank}. {name}")
+    if sel_m:
+        print(f"\n  Forward Selection (kNN), все классы:")
+        for r, i in enumerate(sel_m, 1):
+            a = f'{hist_m[r-1]*100:.1f}%' if r-1 < len(hist_m) else '—'
+            print(f"    {r}. {names[i]:<18s}  Acc = {a}")
 
-    if sel_ml_names:
-        print(f"\n🤖 Forward Selection (kNN) — все классы:")
-        for rank, name in enumerate(sel_ml_names, 1):
-            acc = hist_ml[rank-1]*100 if rank-1 < len(hist_ml) else 0
-            print(f"   {rank}. {name:<18s}  Accuracy = {acc:.1f}%")
-
-    # Пересечение двух наборов
-    common = set(sel_bhatta_names) & set(sel_ml_names)
+    common = set(names[i] for i in sel_b) & set(names[i] for i in sel_m)
     if common:
-        print(f"\n✨ Признаки, отобранные обоими методами: {sorted(common)}")
-        print("   (Высокая согласованность методов подтверждает их информативность)")
+        print(f"\n  ✨ Отобрано обоими методами: {sorted(common)}")
 
-    print(f"\n📂 Все графики сохранены в: {out_dir}")
+    print(f"\n  📂 Все рисунки: {out_dir}")
+    print("\n  ✅ Эксперимент завершён")
     print("=" * 70)
 
 
