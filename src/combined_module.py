@@ -836,7 +836,7 @@ def plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=(2,11)):
     fig.suptitle(
         f'Рисунок 8. Гистограммы признаков для классов C{cls_pair[0]} и C{cls_pair[1]}\n'
         f'({CLASS_NAMES.get(cls_pair[0],"?")} | {CLASS_NAMES.get(cls_pair[1],"?")})',
-        fontsize=12, fontweight='bold')
+        fontsize=12, fontweight='bold', y=0.99)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_08_feature_histograms.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
@@ -891,7 +891,7 @@ def plot_boxplot_by_class(dataset, mask, names, out_dir, max_cls=6):
     fig.suptitle(
         'Рисунок 9. Box-plot нормализованных признаков по классам\n'
         '(медиана, IQR, выбросы — все классы маски)',
-        fontsize=12, fontweight='bold')
+        fontsize=12, fontweight='bold', y=0.99)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_09_boxplot_classes.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
