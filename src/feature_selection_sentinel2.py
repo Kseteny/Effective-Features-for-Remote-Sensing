@@ -20,6 +20,7 @@
 # ---------------------------------------------------------------------------
 import os
 import random
+import sys
 import warnings
 from pathlib import Path
 warnings.filterwarnings('ignore')
@@ -862,7 +863,22 @@ def plot_feature_histograms(dataset, mask, names, out_dir,
     print(f"    Рисунок 8: {os.path.basename(path)}")
     print(f"    Признаки: {[names[i] for i in feat_indices]}")
 
-
+class _Tee:
+    """Пишет одновременно в консоль и в файл."""
+    def __init__(self, filepath):
+        self._file = open(filepath, 'w', encoding='utf-8')
+        self._stdout = sys.stdout
+        sys.stdout = self
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+    def close(self):
+        sys.stdout = self._stdout
+        self._file.close()
+        
 # ===========================================================================
 # ЧАСТЬ 8: ГЛАВНЫЙ ПАЙПЛАЙН
 # ===========================================================================
@@ -890,6 +906,10 @@ def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir      = os.path.join(project_root, 'output')
     os.makedirs(out_dir, exist_ok=True)
+    results_dir = os.path.join(project_root, 'results')   # ← новое
+    os.makedirs(results_dir, exist_ok=True)                # ← новое
+    log_path = os.path.join(results_dir, 'results.txt')   # ← новое
+    tee = _Tee(log_path)                                   # ← новое
     print(f"\n  Графики → {out_dir}")
 
     # -------------------------------------------------------------------
@@ -1148,7 +1168,8 @@ def main():
     print(f"\n  Все рисунки: {out_dir}")
     print("\n  Эксперимент завершён")
     print("=" * 70)
-
+    tee.close()
+    print(f"  Лог сохранён: {log_path}")
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
