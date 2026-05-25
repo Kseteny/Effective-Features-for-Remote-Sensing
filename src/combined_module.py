@@ -12,7 +12,7 @@ combined_module.py
   4. forward_selection_stats.py — Forward Selection по критерию Бхаттачарьи
   5. forward_selection_ml.py   — Forward Selection по точности kNN (5-fold CV)
 
-Итоговые 10 рисунков (курсовая работа):
+Итоговые рисунки (курсовая работа):
   [1]  graph_01 — Матрица корреляций Пирсона признакового пространства
   [2]  graph_02 — KDE-гистограммы распределений признаков по классам
   [3]  graph_03 — Тепловая карта попарных расстояний Бхаттачарьи
@@ -20,9 +20,7 @@ combined_module.py
   [5]  graph_05 — Кривая Forward Selection (критерий Бхаттачарьи)
   [6]  graph_06 — Кривая Forward Selection (kNN Accuracy, 5-fold CV)
   [7]  graph_07 — KDE-эллипсоиды рассеяния двух классов (Mean vs Rho_Avg)
-  [8]  graph_08 — Гистограммы всех признаков для пары классов
-  [9]  graph_09 — Box-plot нормализованных признаков по всем классам
-  [10] graph_10 — Сравнительная таблица методов (comparison_table)
+  [8]  graph_08 — Гистограммы TOP-5 признаков по Forward Selection
 =============================================================================
 """
 
@@ -49,7 +47,7 @@ try:
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
-    print("⚠️  rasterio не установлен — запуск в демо-режиме (синтетические данные).")
+    print("   rasterio не установлен — запуск в демо-режиме (синтетические данные).")
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
@@ -159,19 +157,19 @@ def extract_all_features(image, window_size=15, is_multispectral=False):
     """
     fs = {}
     if is_multispectral and image.ndim == 3:
-        print("  📡 Спектральные индексы (NDVI, NDWI, NDBI)...")
+        print("    Спектральные индексы (NDVI, NDWI, NDBI)...")
         fs.update(compute_spectral_indices(image))
         gray = np.mean(image, axis=0).astype(np.float32)
     else:
         gray = image.astype(np.float32)
         fs['Original'] = gray
 
-    print(f"  📐 Локальные статистики (окно {window_size}×{window_size})...")
+    print(f"    Локальные статистики (окно {window_size}×{window_size})...")
     mean, var, std = get_fast_stats(gray, window_size)
     fs['Mean'] = mean.astype(np.float32)
     fs['Std']  = std.astype(np.float32)
 
-    print("  🧵 Направленные корреляции (0°, 90°, 45°, 135°)...")
+    print("    Направленные корреляции (0°, 90°, 45°, 135°)...")
     rhos = calc_directional_rho(gray, mean, var, window_size)
     fs['Rho_Avg']   = ((rhos['0']+rhos['90']+rhos['45']+rhos['135'])/4).astype(np.float32)
     fs['Rho_Range'] = (
@@ -238,7 +236,7 @@ def select_random_pairs(n_patches=N_PATCHES, seed=RANDOM_SEED):
 
     selected = pairs[:n_patches]
 
-    print(f"\n🎲 Выбрано случайных патчей: {len(selected)}")
+    print(f"\n  Выбрано случайных патчей: {len(selected)}")
     for i, (s2, gr) in enumerate(selected, 1):
         print(f"  {i}. {s2}")
 
@@ -404,11 +402,11 @@ def forward_selection_bhatta(dataset, mask, target_classes=(2,11),
     X1,X2   = X[flat==target_classes[0]], X[flat==target_classes[1]]
 
     if len(X1)<10 or len(X2)<10:
-        print(f"❌ Мало пикселей: C{target_classes[0]}={len(X1)}, C{target_classes[1]}={len(X2)}")
+        print(f"     Мало пикселей: C{target_classes[0]}={len(X1)}, C{target_classes[1]}={len(X2)}")
         return [],[]
 
     selected, cur, history = [], 0.0, []
-    print(f"\n🔍 Forward Selection (Бхаттачарья): классы {target_classes}")
+    print(f"\n  Forward Selection (Бхаттачарья): классы {target_classes}")
 
     for step in range(max_features):
         best_f, best_g = -1, -1.0
@@ -417,10 +415,10 @@ def forward_selection_bhatta(dataset, mask, target_classes=(2,11),
             gain = _bhatta_samples(X1[:,selected+[i]], X2[:,selected+[i]]) - cur
             if gain > best_g: best_g,best_f = gain,i
         if best_g < eps or best_f==-1:
-            print(f"  ⏹  Остановка на шаге {step}. Прирост {best_g:.5f} < {eps}")
+            print(f"     Остановка на шаге {step}. Прирост {best_g:.5f} < {eps}")
             break
         selected.append(best_f); cur+=best_g; history.append(cur)
-        print(f"  Шаг {step+1}: признак #{best_f:>2d}, D_B={cur:.4f} (+{best_g:.4f})")
+        print(f"     Шаг {step+1}: признак #{best_f:>2d}, D_B={cur:.4f} (+{best_g:.4f})")
 
     return selected, history
 
@@ -449,7 +447,7 @@ def forward_selection_ml(dataset, mask, target_classes=None,
         idx=rng.choice(len(X_all),max_samples,replace=False)
         X_all,y_all=X_all[idx],y_all[idx]
 
-    print(f"\n🤖 Forward Selection (kNN): {len(X_all)} пкс, {len(np.unique(y_all))} классов")
+    print(f"\n  Forward Selection (kNN): {len(X_all)} пкс, {len(np.unique(y_all))} классов")
     Xs       = StandardScaler().fit_transform(X_all)
     selected, cur, history = [], 0.0, []
 
@@ -463,7 +461,7 @@ def forward_selection_ml(dataset, mask, target_classes=None,
             gain = acc-cur
             if gain>best_g: best_g,best_f,best_a=gain,i,acc
         if best_g<eps or best_f==-1:
-            print(f"  ⏹  Остановка на шаге {step}. Прирост {best_g:.4f} < {eps}")
+            print(f"     Остановка на шаге {step}. Прирост {best_g:.4f} < {eps}")
             break
         selected.append(best_f); cur=best_a; history.append(cur)
         print(f"  Шаг {step+1}: признак #{best_f:>2d}, Acc={cur:.4f} (+{best_g:.4f})")
@@ -508,7 +506,7 @@ def plot_feature_correlation(dataset, mask, names, out_dir):
     """
     X = dataset.reshape(-1, dataset.shape[-1])[mask.flatten() > 0]
     if len(X) < 10:
-        print("  ⚠️  Мало данных — рисунок 1 пропущен"); return
+        print("     Мало данных — рисунок 1 пропущен"); return
 
     corr = np.corrcoef(X.T)
     fig, ax = plt.subplots(figsize=(11, 9))
@@ -544,7 +542,7 @@ def plot_feature_correlation(dataset, mask, names, out_dir):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_01_feature_correlation.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 1: {os.path.basename(path)}")
+    print(f"    Рисунок 1: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [2]
@@ -588,7 +586,7 @@ def plot_class_distributions(dataset, mask, names, out_dir,
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_02_class_distributions.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 2: {os.path.basename(path)}")
+    print(f"    Рисунок 2: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [3]
@@ -615,7 +613,7 @@ def plot_bhatta_heatmap(df_bhatta, out_dir):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_03_bhatta_heatmap.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 3: {os.path.basename(path)}")
+    print(f"    Рисунок 3: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [4]
@@ -643,7 +641,7 @@ def plot_maha_heatmap(df_maha, out_dir):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_04_maha_heatmap.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 4: {os.path.basename(path)}")
+    print(f"    Рисунок 4: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [5]
@@ -655,7 +653,7 @@ def plot_bhatta_forward_selection(history, sel_names, out_dir):
     «Колено» кривой указывает на оптимальный размер подмножества признаков.
     """
     if not history:
-        print("  ⚠️  Нет данных — рисунок 5 пропущен"); return
+        print("     Нет данных — рисунок 5 пропущен"); return
 
     x = list(range(1, len(history)+1))
     gains = [history[0]] + [history[i]-history[i-1] for i in range(1, len(history))]
@@ -691,7 +689,7 @@ def plot_bhatta_forward_selection(history, sel_names, out_dir):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_05_forward_bhatta.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 5: {os.path.basename(path)}")
+    print(f"    Рисунок 5: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [6]
@@ -703,7 +701,7 @@ def plot_ml_forward_selection(history, sel_names, out_dir):
     статистического и ML-критериев отбора признаков.
     """
     if not history:
-        print("  ⚠️  Нет данных — рисунок 6 пропущен"); return
+        print("     Нет данных — рисунок 6 пропущен"); return
 
     x      = list(range(1, len(history)+1))
     pct    = [v*100 for v in history]
@@ -749,7 +747,7 @@ def plot_ml_forward_selection(history, sel_names, out_dir):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_06_forward_ml.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 6: {os.path.basename(path)}")
+    print(f"    Рисунок 6: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [7]
@@ -796,106 +794,85 @@ def plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=(2,11)):
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_07_kde_ellipsoids.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 7: {os.path.basename(path)}")
+    print(f"    Рисунок 7: {os.path.basename(path)}")
 
 
 # --------------------------------------------------------------------------- [8]
-def plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=(2,11)):
+def plot_feature_histograms(dataset, mask, names, out_dir,
+                             cls_pair=(2, 11),
+                             selected_indices=None,
+                             top_n=5):
     """
-    Рисунок 8. Гистограммы всех признаков для пары классов.
+    Рисунок 8. Гистограммы TOP-N наиболее информативных признаков.
 
-    Площадь пересечения гистограмм ≈ вероятность ошибки классификации
-    по одному признаку (байесовская граница Байеса).
+    Показывает только признаки, отобранные Forward Selection (sel_m или sel_b),
+    что делает график читаемым и информативным.
+    Площадь пересечения гистограмм ≈ вероятность ошибки по одному признаку.
+
+    Параметры
+    ---------
+    selected_indices : list[int] | None
+        Индексы признаков из Forward Selection. Если None — берутся первые top_n.
+    top_n : int
+        Сколько признаков показывать (по умолчанию 5).
     """
     flat      = mask.flatten()
     data_flat = dataset.reshape(-1, dataset.shape[-1])
-    c         = len(names)
-    cols      = 4
-    rows      = (c + cols - 1) // cols
 
-    fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*3.2))
+    # --- Определяем какие признаки рисовать ---
+    if selected_indices and len(selected_indices) > 0:
+        feat_indices = selected_indices[:top_n]
+        source_label = f'TOP-{len(feat_indices)} по Forward Selection'
+    else:
+        feat_indices = list(range(min(top_n, len(names))))
+        source_label = f'первые {len(feat_indices)} признаков'
+
+    n    = len(feat_indices)
+    cols = min(n, 5)
+    rows = (n + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols,
+                              figsize=(cols * 4.2, rows * 3.8),
+                              squeeze=False)
     axes = axes.flatten()
 
-    for i, fname in enumerate(names):
-        ax = axes[i]
+    for plot_idx, feat_idx in enumerate(feat_indices):
+        ax    = axes[plot_idx]
+        fname = names[feat_idx]
+
         for cls in cls_pair:
-            px  = data_flat[flat == cls, i]
-            if len(px) < 5: continue
+            px  = data_flat[flat == cls, feat_idx]
+            if len(px) < 5:
+                continue
             col = PALETTE.get(cls, DEFAULT_COLORS[0])
-            ax.hist(px, bins=45, density=True, alpha=0.50,
-                    color=col, label=f'C{cls}', edgecolor='none')
-        ax.set_title(fname, fontsize=9, fontweight='bold')
-        ax.set_xlabel('Значение', fontsize=7)
-        ax.set_ylabel('Плотность', fontsize=7)
-        ax.tick_params(labelsize=7)
-        ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
+            ax.hist(px, bins=50, density=True, alpha=0.55,
+                    color=col,
+                    label=f'C{cls}: {CLASS_NAMES.get(cls, "?")}[:20]',
+                    edgecolor='none')
 
-    for j in range(i+1, len(axes)):
+        ax.set_title(f'#{plot_idx+1}  {fname}', fontsize=10, fontweight='bold')
+        ax.set_xlabel('Значение признака', fontsize=8)
+        ax.set_ylabel('Плотность', fontsize=8)
+        ax.tick_params(labelsize=8)
+        ax.legend(fontsize=8, loc='upper right')
+        ax.grid(True, alpha=0.3)
+
+    for j in range(n, len(axes)):
         axes[j].axis('off')
 
     fig.suptitle(
-        f'Рисунок 8. Гистограммы признаков для классов C{cls_pair[0]} и C{cls_pair[1]}\n'
-        f'({CLASS_NAMES.get(cls_pair[0],"?")} | {CLASS_NAMES.get(cls_pair[1],"?")})',
-        fontsize=12, fontweight='bold', y=0.99)
-    plt.tight_layout()
+        f'Рисунок 8. Гистограммы признаков для классов '
+        f'C{cls_pair[0]} и C{cls_pair[1]}\n'
+        f'({CLASS_NAMES.get(cls_pair[0], "?")} | '
+        f'{CLASS_NAMES.get(cls_pair[1], "?")}) — {source_label}',
+        fontsize=12, fontweight='bold', y=1.01)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
     path = os.path.join(out_dir, 'graph_08_feature_histograms.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 8: {os.path.basename(path)}")
-
-
-# --------------------------------------------------------------------------- [9]
-def plot_boxplot_by_class(dataset, mask, names, out_dir, max_cls=6):
-    """
-    Рисунок 9. Box-plot нормализованных признаков по всем классам.
-
-    Признаки нормированы в [0,1] для сопоставимости. Показывает медиану,
-    IQR и выбросы — полезно для оценки межклассовых различий одновременно
-    по всем признакам.
-    """
-    flat      = mask.flatten()
-    data_flat = dataset.reshape(-1, dataset.shape[-1]).astype(np.float64)
-    classes   = sorted(c for c in np.unique(mask) if c > 0)[:max_cls]
-
-    # Нормализация [0,1]
-    for i in range(data_flat.shape[1]):
-        mn,mx = data_flat[:,i].min(), data_flat[:,i].max()
-        if mx>mn: data_flat[:,i] = (data_flat[:,i]-mn)/(mx-mn)
-
-    n_feat = len(names)
-    cols   = 2
-    rows   = (n_feat + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(cols*7, rows*3.5))
-    axes = axes.flatten()
-
-    for i, fname in enumerate(names):
-        ax = axes[i]
-        groups, lbls, cols_bp = [], [], []
-        for cls in classes:
-            px = data_flat[flat == cls, i]
-            if len(px)<5: continue
-            groups.append(px); lbls.append(f'C{cls}')
-            cols_bp.append(PALETTE.get(cls, DEFAULT_COLORS[classes.index(cls)%10]))
-
-        bp = ax.boxplot(groups, patch_artist=True, notch=False, widths=0.5,
-                        medianprops=dict(color='black', lw=2))
-        for patch, col in zip(bp['boxes'], cols_bp):
-            patch.set_facecolor(col); patch.set_alpha(0.6)
-        ax.set_xticks(range(1, len(lbls)+1)); ax.set_xticklabels(lbls, fontsize=8)
-        ax.set_title(fname, fontsize=9, fontweight='bold')
-        ax.set_ylabel('Норм. значение [0,1]', fontsize=8)
-        ax.grid(True, alpha=0.3, axis='y')
-
-    for j in range(i+1, len(axes)):
-        axes[j].axis('off')
-
-    fig.suptitle(
-        'Рисунок 9. Box-plot нормализованных признаков по классам\n'
-        '(медиана, IQR, выбросы — все классы маски)',
-        fontsize=12, fontweight='bold', y=0.99)
-    plt.tight_layout()
-    path = os.path.join(out_dir, 'graph_09_boxplot_classes.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  ✅ Рисунок 9: {os.path.basename(path)}")
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"    Рисунок 8: {os.path.basename(path)}")
+    print(f"    Признаки: {[names[i] for i in feat_indices]}")
 
 
 # ===========================================================================
@@ -912,7 +889,7 @@ def main():
       5. Статистический анализ (Махаланобис + Бхаттачарья)
       6. Forward Selection — Бхаттачарья (пара классов 2↔11)
       7. Forward Selection — kNN 5-fold CV (все классы)
-      8. Построение 9 рисунков (graph_01 – graph_09)
+      8. Построение 8 рисунков (graph_01 – graph_08, TOP-5 гистограммы)
       9. Итоговый отчёт в консоль
     """
     print("=" * 70)
@@ -925,7 +902,7 @@ def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir      = os.path.join(project_root, 'output')
     os.makedirs(out_dir, exist_ok=True)
-    print(f"\n📁 Графики → {out_dir}")
+    print(f"\n  Графики → {out_dir}")
 
     # -------------------------------------------------------------------
     # ШАГ 1: Загрузка / генерация данных
@@ -1001,17 +978,17 @@ def main():
                             X_global = np.vstack([X_global, X_patch])
                             y_global = np.concatenate([y_global, y_patch])
 
-                        print(f"    ✅ +{len(X_patch):,} пкс | итого: {len(X_global):,}")
+                        print(f"  +{len(X_patch):,} пкс | итого: {len(X_global):,}")
 
                     except Exception as e:
-                        print(f"    ⚠️  Ошибка патча {s2_name}: {e}")
+                        print(f"  Ошибка патча {s2_name}: {e}")
 
                 if X_global is not None and len(X_global) > 100:
                     use_demo = False
-                    print(f"\n  ✅ Загружено {len(pairs)} патчей: {len(X_global):,} пикселей")
+                    print(f"\n  Загружено {len(pairs)} патчей: {len(X_global):,} пикселей")
 
             except Exception as e:
-                print(f"  ⚠️  Ошибка загрузки патчей: {e}. Переключаюсь на демо-данные.")
+                print(f"  Ошибка загрузки патчей: {e}. Переключаюсь на демо-данные.")
 
         else:
             # Пробуем найти хотя бы один .tif
@@ -1036,13 +1013,13 @@ def main():
                     cube, names = make_feature_sandwich(feat_dict)
                     X_global, y_global = build_global_dataset(cube, patch_mask)
                     use_demo = False
-                    print(f"  ✅ Одиночный патч: {len(X_global):,} пикселей")
+                    print(f"  Одиночный патч: {len(X_global):,} пикселей")
                 except Exception as e:
-                    print(f"  ❌ Ошибка: {e}. Переключаюсь на демо-данные.")
+                    print(f"  Ошибка: {e}. Переключаюсь на демо-данные.")
 
     # --- Демо-режим ---
     if use_demo:
-        print("  🎲 Генерация синтетических данных (Multi-Patch демо, 4×256×256)...")
+        print("  Генерация синтетических данных (Multi-Patch демо, 4×256×256)...")
         X_parts, y_parts = [], []
         for seed_offset in range(N_PATCHES):
             img_norm, patch_mask = _generate_synthetic_data(
@@ -1057,7 +1034,7 @@ def main():
 
         X_global = np.vstack(X_parts)
         y_global = np.concatenate(y_parts)
-        print(f"  ✅ Синтетика: {N_PATCHES} патчей, {len(X_global):,} пикселей")
+        print(f"  Синтетика: {N_PATCHES} патчей, {len(X_global):,} пикселей")
 
     # -------------------------------------------------------------------
     # ШАГ 2: Субдискретизация
@@ -1068,7 +1045,7 @@ def main():
     X_global, y_global = subsample_dataset(X_global, y_global,
                                             max_samples=MAX_PIXELS_TOTAL,
                                             seed=RANDOM_SEED)
-    print(f"  📊 Итоговая выборка: {len(X_global):,} пикселей, {len(names)} признаков")
+    print(f"  Итоговая выборка: {len(X_global):,} пикселей, {len(names)} признаков")
 
     unique_cls = np.unique(y_global)
     unique_cls = unique_cls[unique_cls > 0]
@@ -1113,7 +1090,7 @@ def main():
         sel_b, hist_b = forward_selection_bhatta(
             dataset, mask, pair, eps=0.001, max_features=10
         )
-        print(f"\n  🏆 Бхаттачарья: {[names[i] for i in sel_b]}")
+        print(f"\n  Бхаттачарья: {[names[i] for i in sel_b]}")
 
     # -------------------------------------------------------------------
     # ШАГ 5: Forward Selection — kNN
@@ -1126,13 +1103,13 @@ def main():
         target_classes=[int(c) for c in unique_cls],
         eps=0.001, max_features=10
     )
-    print(f"\n  🏆 kNN: {[names[i] for i in sel_m]}")
+    print(f"\n  kNN: {[names[i] for i in sel_m]}")
 
     # -------------------------------------------------------------------
     # ШАГ 6: Построение рисунков
     # -------------------------------------------------------------------
     print("\n" + "─" * 60)
-    print("ШАГ 6: Построение рисунков (1–10)")
+    print("ШАГ 6: Построение рисунков (1–8)")
     print("─" * 60)
 
     clsp = pair if pair else (int(unique_cls[0]), int(unique_cls[0]))
@@ -1144,9 +1121,14 @@ def main():
     plot_bhatta_forward_selection(hist_b, [names[i] for i in sel_b], out_dir)
     plot_ml_forward_selection(hist_m, [names[i] for i in sel_m], out_dir)
     plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=clsp)
-    plot_feature_histograms(dataset, mask, names, out_dir, cls_pair=clsp)
-    plot_boxplot_by_class(dataset, mask, names, out_dir)
-    # (graph_10 — сравнительная таблица строится отдельно в анализе результатов)
+
+    # TOP-5 по sel_m (kNN), если нет — по sel_b (Бхаттачарья)
+    top5_indices = sel_m if sel_m else sel_b
+    plot_feature_histograms(dataset, mask, names, out_dir,
+                             cls_pair=clsp,
+                             selected_indices=top5_indices,
+                             top_n=5)
+    # (graph_09, graph_10 строятся отдельно в анализе результатов)
 
     # -------------------------------------------------------------------
     # ИТОГОВЫЙ ОТЧЁТ
@@ -1173,10 +1155,10 @@ def main():
 
     common = set(names[i] for i in sel_b) & set(names[i] for i in sel_m)
     if common:
-        print(f"\n  ✨ Отобрано обоими методами: {sorted(common)}")
+        print(f"\n  Отобрано обоими методами: {sorted(common)}")
 
-    print(f"\n  📂 Все рисунки: {out_dir}")
-    print("\n  ✅ Эксперимент завершён")
+    print(f"\n  Все рисунки: {out_dir}")
+    print("\n  Эксперимент завершён")
     print("=" * 70)
 
 
