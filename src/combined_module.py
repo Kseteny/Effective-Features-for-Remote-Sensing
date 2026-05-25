@@ -798,28 +798,19 @@ def plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=(2,11)):
 
 
 # --------------------------------------------------------------------------- [8]
+# --------------------------------------------------------------------------- [8]
 def plot_feature_histograms(dataset, mask, names, out_dir,
                              cls_pair=(2, 11),
                              selected_indices=None,
                              top_n=5):
     """
     Рисунок 8. Гистограммы TOP-N наиболее информативных признаков.
-
-    Показывает только признаки, отобранные Forward Selection (sel_m или sel_b),
-    что делает график читаемым и информативным.
-    Площадь пересечения гистограмм ≈ вероятность ошибки по одному признаку.
-
-    Параметры
-    ---------
-    selected_indices : list[int] | None
-        Индексы признаков из Forward Selection. Если None — берутся первые top_n.
-    top_n : int
-        Сколько признаков показывать (по умолчанию 5).
+    Раскладка: 3 графика в верхнем ряду, 2 — в нижнем по центру.
     """
+    from matplotlib.gridspec import GridSpec
     flat      = mask.flatten()
     data_flat = dataset.reshape(-1, dataset.shape[-1])
 
-    # --- Определяем какие признаки рисовать ---
     if selected_indices and len(selected_indices) > 0:
         feat_indices = selected_indices[:top_n]
         source_label = f'TOP-{len(feat_indices)} по Forward Selection'
@@ -827,46 +818,52 @@ def plot_feature_histograms(dataset, mask, names, out_dir,
         feat_indices = list(range(min(top_n, len(names))))
         source_label = f'первые {len(feat_indices)} признаков'
 
-    n    = len(feat_indices)
-    cols = min(n, 5)
-    rows = (n + cols - 1) // cols
-
-    fig, axes = plt.subplots(rows, cols,
-                              figsize=(cols * 4.2, rows * 3.8),
-                              squeeze=False)
-    axes = axes.flatten()
-
-    for plot_idx, feat_idx in enumerate(feat_indices):
-        ax    = axes[plot_idx]
+    def _draw_hist(ax, feat_idx, rank):
         fname = names[feat_idx]
-
         for cls in cls_pair:
-            px  = data_flat[flat == cls, feat_idx]
+            px = data_flat[flat == cls, feat_idx]
             if len(px) < 5:
                 continue
             col = PALETTE.get(cls, DEFAULT_COLORS[0])
             ax.hist(px, bins=50, density=True, alpha=0.55,
                     color=col,
-                    label=f'C{cls}: {CLASS_NAMES.get(cls, "?")}[:20]',
+                    label=f'C{cls}: {CLASS_NAMES.get(cls, "")}',
                     edgecolor='none')
-
-        ax.set_title(f'#{plot_idx+1}  {fname}', fontsize=10, fontweight='bold')
-        ax.set_xlabel('Значение признака', fontsize=8)
-        ax.set_ylabel('Плотность', fontsize=8)
-        ax.tick_params(labelsize=8)
-        ax.legend(fontsize=8, loc='upper right')
+        ax.set_title(f'#{rank}  {fname}', fontsize=12, fontweight='bold', pad=8)
+        ax.set_xlabel('Значение признака', fontsize=10)
+        ax.set_ylabel('Плотность', fontsize=10)
+        ax.tick_params(labelsize=9)
+        ax.legend(fontsize=9, loc='upper right')
         ax.grid(True, alpha=0.3)
 
-    for j in range(n, len(axes)):
-        axes[j].axis('off')
+    fig = plt.figure(figsize=(15, 10))
+
+    # Верхний ряд — 3 графика равномерно
+    gs_top = GridSpec(1, 3, figure=fig,
+                      left=0.07, right=0.97,
+                      top=0.88, bottom=0.54,
+                      wspace=0.35)
+    for col_i, feat_idx in enumerate(feat_indices[:3]):
+        ax = fig.add_subplot(gs_top[0, col_i])
+        _draw_hist(ax, feat_idx, col_i + 1)
+
+    # Нижний ряд — 2 графика по центру
+    gs_bot = GridSpec(1, 4, figure=fig,
+                      left=0.07, right=0.97,
+                      top=0.44, bottom=0.08,
+                      wspace=0.35)
+    bottom_indices = feat_indices[3:5]
+    offsets = [0, 2] if len(bottom_indices) == 2 else [1]
+    for pos, feat_idx in zip(offsets, bottom_indices):
+        ax = fig.add_subplot(gs_bot[0, pos:pos+2])
+        _draw_hist(ax, feat_idx, feat_indices.index(feat_idx) + 1)
 
     fig.suptitle(
         f'Рисунок 8. Гистограммы признаков для классов '
         f'C{cls_pair[0]} и C{cls_pair[1]}\n'
         f'({CLASS_NAMES.get(cls_pair[0], "?")} | '
         f'{CLASS_NAMES.get(cls_pair[1], "?")}) — {source_label}',
-        fontsize=12, fontweight='bold', y=1.01)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
+        fontsize=13, fontweight='bold', y=0.99)
 
     path = os.path.join(out_dir, 'graph_08_feature_histograms.png')
     plt.savefig(path, dpi=150, bbox_inches='tight')
