@@ -35,8 +35,7 @@ try:
     from scipy.ndimage import zoom
     HAS_RASTERIO = True
 except ImportError:
-    HAS_RASTERIO = False
-    print("Ошибка: rasterio не установлен. Установите: pip install rasterio")
+    raise ImportError("rasterio не установлен. Установите: pip install rasterio")
         
 
 from sklearn.neighbors import KNeighborsClassifier
@@ -926,11 +925,11 @@ def main():
                     except Exception as e:
                         print(f"  Ошибка патча {s2_name}: {e}")
 
-                if X_global is not None and len(X_global) > 100:
-                    print(f"\n  Загружено {len(pairs)} патчей: {len(X_global):,} пикселей")
+                if X_global is None or len(X_global) < 100:
+                    raise RuntimeError("Данные не загружены. Проверьте наличие файлов в data/s2_pref/ и data/ground_reference/")
 
             except Exception as e:
-                print(f"  Ошибка загрузки патчей: {e}")
+                raise RuntimeError(f"Ошибка загрузки патчей: {e}")
 
         else:
             # Пробуем найти хотя бы один .tif
