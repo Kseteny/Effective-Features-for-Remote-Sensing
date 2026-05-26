@@ -2,7 +2,6 @@
 Курсовая работа: «Статистические методы отбора признаков при классификации
 космических изображений»
 
-
 Итоговые рисунки (курсовая работа):
   [1]  graph_01 — Матрица корреляций Пирсона признакового пространства
   [2]  graph_02 — KDE-гистограммы распределений признаков по классам
@@ -15,9 +14,7 @@
 =============================================================================
 """
 
-# ---------------------------------------------------------------------------
 # Импорты
-# ---------------------------------------------------------------------------
 import os
 import random
 import sys
@@ -88,7 +85,7 @@ def _label(cls):
     return f"C{cls}: {name[:18]}{'…' if len(name)>18 else ''}"
 
 # ===========================================================================
-# ЧАСТЬ 1: ВЫЧИСЛЕНИЕ ПРИЗНАКОВ (fast_features.py)
+# ЧАСТЬ 1: ВЫЧИСЛЕНИЕ ПРИЗНАКОВ
 # ===========================================================================
 
 def get_fast_stats(image, window_size):
@@ -179,7 +176,7 @@ def make_feature_sandwich(fd):
     return np.stack([fd[n].astype(np.float32) for n in names], axis=-1), names
 
 # ===========================================================================
-# ЧАСТЬ 2: ЗАГРУЗКА ДАННЫХ (loader.py)
+# ЧАСТЬ 2: ЗАГРУЗКА ДАННЫХ
 # ===========================================================================
 
 SENTINEL2_CHANNELS = {
@@ -295,7 +292,7 @@ def auto_find_data(project_root=None):
     return img_path, mask_path
 
 # ===========================================================================
-# ЧАСТЬ 3: СТАТИСТИЧЕСКИЙ АНАЛИЗ (evaluate_features.py)
+# ЧАСТЬ 3: СТАТИСТИЧЕСКИЙ АНАЛИЗ
 # ===========================================================================
 
 def calculate_class_stats(dataset, mask, class_id):
@@ -356,7 +353,7 @@ def compute_all_pairwise_distances(stats, classes):
             pd.DataFrame(mb, index=lbl, columns=lbl))
 
 # ===========================================================================
-# ЧАСТЬ 4: FORWARD SELECTION — БХАТТАЧАРЬЯ (forward_selection_stats.py)
+# ЧАСТЬ 4: FORWARD SELECTION — БХАТТАЧАРЬЯ
 # ===========================================================================
 
 def _bhatta_samples(X1, X2):
@@ -415,7 +412,7 @@ def forward_selection_bhatta(dataset, mask, target_classes=(2,11),
     return selected, history
 
 # ===========================================================================
-# ЧАСТЬ 5: FORWARD SELECTION — ML / kNN  (forward_selection_ml.py)
+# ЧАСТЬ 5: FORWARD SELECTION — ML / kNN
 # ===========================================================================
 
 def forward_selection_ml(dataset, mask, target_classes=None,
@@ -519,11 +516,6 @@ def plot_feature_correlation(dataset, mask, names, out_dir):
                         fontsize=6.5, color=color,
                         fontweight='bold' if abs(val) > thresh else 'normal')
 
-    ax.set_title(
-        'Рисунок 1. Матрица корреляций Пирсона признакового пространства\n'
-        f'(выделены пары с |r| > {thresh} — кандидаты на фильтрацию)',
-        fontsize=12, fontweight='bold', pad=12)
-
     # Рамки вокруг высоко-коррелированных ячеек
     for i in range(len(names)):
         for j in range(len(names)):
@@ -567,14 +559,9 @@ def plot_class_distributions(dataset, mask, names, out_dir,
                             alpha=0.30, color=col)
             ax.plot(ctrs, gaussian_filter1d(cnts, 2),
                     color=col, lw=2, label=_label(cls))
-        ax.set_title(f'Признак: {fname}', fontsize=10, fontweight='bold')
         ax.set_xlabel('Значение'); ax.set_ylabel('Плотность вероятности')
         ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 
-    fig.suptitle(
-        'Рисунок 2. Распределения ключевых признаков по классам\n'
-        '(сглаженные KDE-гистограммы)',
-        fontsize=12, fontweight='bold')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_02_class_distributions.png')
     plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
@@ -597,10 +584,6 @@ def plot_bhatta_heatmap(df_bhatta, out_dir):
     sns.heatmap(data, ax=ax, cmap='YlOrRd', annot=True, fmt='.2f',
                 linewidths=0.5, linecolor='#ccc',
                 cbar_kws={'label': 'Расстояние Бхаттачарьи D_B'})
-    ax.set_title(
-        'Рисунок 3. Попарные расстояния Бхаттачарьи между классами\n'
-        '(полный признаковый набор, диагональ = NaN)',
-        fontsize=12, fontweight='bold')
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_03_bhatta_heatmap.png')
@@ -625,10 +608,6 @@ def plot_maha_heatmap(df_maha, out_dir):
     sns.heatmap(data, ax=ax, cmap='Blues', annot=True, fmt='.2f',
                 linewidths=0.5, linecolor='#ccc',
                 cbar_kws={'label': 'Расстояние Махаланобиса D_M'})
-    ax.set_title(
-        'Рисунок 4. Попарные расстояния Махаланобиса между классами\n'
-        '(полный признаковый набор, диагональ = NaN)',
-        fontsize=12, fontweight='bold')
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_04_maha_heatmap.png')
@@ -669,10 +648,6 @@ def plot_bhatta_forward_selection(history, sel_names, out_dir):
     ax2.tick_params(axis='y', labelcolor='#E63946')
     ax1.set_xticks(x)
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(
-        'Рисунок 5. Forward Selection по критерию Бхаттачарьи\n'
-        f'(пара классов {sel_names[0] if sel_names else "?"} — жадный алгоритм)',
-        fontsize=12, fontweight='bold')
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -727,10 +702,6 @@ def plot_ml_forward_selection(history, sel_names, out_dir):
     ax2.tick_params(axis='y', labelcolor='#2A9D8F')
     ax1.set_xticks(x)
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(
-        'Рисунок 6. Forward Selection по точности kNN (5-fold CV, k=5)\n'
-        '(все классы маски, macro accuracy)',
-        fontsize=12, fontweight='bold')
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -778,10 +749,6 @@ def plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=(2,11)):
 
     ax.set_xlabel(f'Признак: {fx}', fontsize=11)
     ax.set_ylabel(f'Признак: {fy}', fontsize=11)
-    ax.set_title(
-        f'Рисунок 7. KDE-эллипсоиды рассеяния классов\n'
-        f'(проекция: {fx} vs {fy}, ★ — центроид)',
-        fontsize=12, fontweight='bold')
     ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_07_kde_ellipsoids.png')
@@ -789,7 +756,6 @@ def plot_kde_ellipsoids(dataset, mask, names, out_dir, cls_pair=(2,11)):
     print(f"    Рисунок 7: {os.path.basename(path)}")
 
 
-# --------------------------------------------------------------------------- [8]
 # --------------------------------------------------------------------------- [8]
 def plot_feature_histograms(dataset, mask, names, out_dir,
                              cls_pair=(2, 11),
@@ -821,7 +787,6 @@ def plot_feature_histograms(dataset, mask, names, out_dir,
                     color=col,
                     label=f'C{cls}: {CLASS_NAMES.get(cls, "")}',
                     edgecolor='none')
-        ax.set_title(f'#{rank}  {fname}', fontsize=12, fontweight='bold', pad=8)
         ax.set_xlabel('Значение признака', fontsize=10)
         ax.set_ylabel('Плотность', fontsize=10)
         ax.tick_params(labelsize=9)
@@ -849,13 +814,6 @@ def plot_feature_histograms(dataset, mask, names, out_dir,
     for pos, feat_idx in zip(offsets, bottom_indices):
         ax = fig.add_subplot(gs_bot[0, pos:pos+2])
         _draw_hist(ax, feat_idx, feat_indices.index(feat_idx) + 1)
-
-    fig.suptitle(
-        f'Рисунок 8. Гистограммы признаков для классов '
-        f'C{cls_pair[0]} и C{cls_pair[1]}\n'
-        f'({CLASS_NAMES.get(cls_pair[0], "?")} | '
-        f'{CLASS_NAMES.get(cls_pair[1], "?")}) — {source_label}',
-        fontsize=13, fontweight='bold', y=0.99)
 
     path = os.path.join(out_dir, 'graph_08_feature_histograms.png')
     plt.savefig(path, dpi=150, bbox_inches='tight')
