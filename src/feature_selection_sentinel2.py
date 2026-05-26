@@ -36,7 +36,8 @@ try:
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
-    print("   rasterio не установлен — будут использованы синтетические данные.")
+    print("Ошибка: rasterio не установлен. Установите: pip install rasterio")
+        
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
@@ -458,29 +459,6 @@ def forward_selection_ml(dataset, mask, target_classes=None,
     return selected, history
 
 # ===========================================================================
-# ЧАСТЬ 6: Синтетические данные
-# ===========================================================================
-
-def _generate_synthetic_data(H=256, W=256, seed=42):
-    """
-    Синтетические данные при отсутствии реальных снимков.
-    Два основных класса (2 — город, 11 — лес) + два дополнительных.
-    """
-    rng = np.random.default_rng(seed)
-    img = rng.integers(30, 220, size=(H,W), dtype=np.uint8)
-    mask= np.zeros((H,W), dtype=np.uint8)
-
-    # Квадранты
-    mask[:H//2, :W//2] = 2    # город (яркий)
-    mask[H//2:,  W//2:]= 11   # лес   (тёмный, шумный)
-    mask[:H//4,  W//2:]= 3    # промзона
-    mask[H//2:, :W//4] = 14   # луга
-
-    img[:H//2,:W//2] = np.clip(rng.normal(160,20,(H//2,W//2)), 80,255).astype(np.uint8)
-    img[H//2:, W//2:]= np.clip(rng.normal(90, 35,(H//2,W//2)), 20,200).astype(np.uint8)
-    return img, mask
-
-# ===========================================================================
 # ЧАСТЬ 7: ВИЗУАЛИЗАЦИЯ — 10 РИСУНКОВ
 # ===========================================================================
 
@@ -845,7 +823,7 @@ class _Tee:
 def main():
     """
     Полный Multi-Patch пайплайн курсовой работы (MultiSenGE):
-      1. Загрузка нескольких случайных патчей (синтетических данных)
+      1. Загрузка нескольких случайных патчей из датасета MultiSenGE
       2. Вычисление признакового пространства для каждого патча
       3. Объединение пикселей всех патчей в единую статистическую выборку
       4. Субдискретизация до MAX_PIXELS_TOTAL
@@ -881,8 +859,6 @@ def main():
     X_global = None
     y_global = None
     names    = None
-
-    use_synthetic  = True
 
     # --- Попытка загрузить реальные патчи ---
     if HAS_RASTERIO:
@@ -951,11 +927,10 @@ def main():
                         print(f"  Ошибка патча {s2_name}: {e}")
 
                 if X_global is not None and len(X_global) > 100:
-                    use_synthetic = False
                     print(f"\n  Загружено {len(pairs)} патчей: {len(X_global):,} пикселей")
 
             except Exception as e:
-                print(f"  Ошибка загрузки патчей: {e}. Переключаюсь на синтетические данные.")
+                print(f"  Ошибка загрузки патчей: {e}")
 
         else:
             # Пробуем найти хотя бы один .tif
@@ -979,29 +954,9 @@ def main():
                                                      is_multispectral=False)
                     cube, names = make_feature_sandwich(feat_dict)
                     X_global, y_global = build_global_dataset(cube, patch_mask)
-                    use_synthetic = False
                     print(f"  Одиночный патч: {len(X_global):,} пикселей")
                 except Exception as e:
-                    print(f"  Ошибка: {e}. Переключаюсь на синтетические данные.")
-
-    # --- Синтетический режим ---
-    if use_synthetic:
-        print("  Генерация синтетических данных (Multi-Patch синтетика, 4×256×256)...")
-        X_parts, y_parts = [], []
-        for seed_offset in range(N_PATCHES):
-            img_norm, patch_mask = _generate_synthetic_data(
-                H=256, W=256, seed=RANDOM_SEED + seed_offset
-            )
-            feat_dict = extract_all_features(img_norm, window_size=WINDOW_SIZE,
-                                             is_multispectral=False)
-            cube, names = make_feature_sandwich(feat_dict)
-            X_p, y_p = build_global_dataset(cube, patch_mask)
-            X_parts.append(X_p)
-            y_parts.append(y_p)
-
-        X_global = np.vstack(X_parts)
-        y_global = np.concatenate(y_parts)
-        print(f"  Синтетика: {N_PATCHES} патчей, {len(X_global):,} пикселей")
+                    raise RuntimeError(f"Ошибка загрузки одиночного патча: {e}")
 
     # -------------------------------------------------------------------
     # ШАГ 2: Субдискретизация
