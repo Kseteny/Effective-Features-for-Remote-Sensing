@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import median_filter
 
 from loader import get_file_lists, load_pair
-from features import compute_basic_features, compute_indices, compute_glcm_features
+from effective_features.features import compute_basic_features, compute_indices, compute_glcm_features
 from classifier import prepare_data, train_and_eval, predict_full_image
 
 def main():
