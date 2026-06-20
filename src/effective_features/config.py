@@ -53,20 +53,37 @@ class ExperimentConfig:
     project_root: Optional[str] = None
     output_dir: Optional[str] = None
     results_dir: Optional[str] = None
+    run_tag: Optional[str] = None
+    # run_tag — метка запуска. Если задана (например 'seed7'), результаты
+    # кладутся в отдельную папку results/<run_tag>/, графики туда же.
+    # Нужно для серии запусков с разными seed (модуль compare).
 
     def resolve_paths(self, base_file: str):
         """
         Достраивает пути относительно структуры проекта.
         base_file — путь к вызывающему модулю (обычно pipeline.py).
         Структура: <root>/src/effective_features/<module>.py
+
+        Если задан run_tag — все результаты (txt + графики) кладутся
+        в отдельную папку results/<run_tag>/, чтобы запуски не перезатирались.
         """
         if self.project_root is None:
             self.project_root = os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(base_file))))
-        if self.output_dir is None:
-            self.output_dir = os.path.join(self.project_root, 'output')
-        if self.results_dir is None:
-            self.results_dir = os.path.join(self.project_root, 'results')
+
+        if self.run_tag:
+            # Изолированная папка под этот запуск
+            base = os.path.join(self.project_root, 'results', self.run_tag)
+            if self.results_dir is None:
+                self.results_dir = base
+            if self.output_dir is None:
+                self.output_dir = base
+        else:
+            if self.output_dir is None:
+                self.output_dir = os.path.join(self.project_root, 'output')
+            if self.results_dir is None:
+                self.results_dir = os.path.join(self.project_root, 'results')
+
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
         return self
