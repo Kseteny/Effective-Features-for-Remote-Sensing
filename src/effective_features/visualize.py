@@ -1,4 +1,4 @@
-"""
+﻿"""
 visualize.py — построение итоговых рисунков эксперимента.
 
 Рисунки:
@@ -11,6 +11,7 @@ visualize.py — построение итоговых рисунков эксп
   graph_07 — Согласованность критериев отбора
 """
 
+import io
 import os
 import numpy as np
 import pandas as pd
@@ -21,6 +22,15 @@ import seaborn as sns
 
 from .config import PALETTE, DEFAULT_COLORS
 from .features import parse_feature_window
+
+
+def _savefig(path, dpi=150):
+    buf = io.BytesIO()
+    plt.savefig(buf, dpi=dpi, bbox_inches='tight', format='png')
+    plt.close()
+    buf.seek(0)
+    with open(path, 'wb') as f:
+        f.write(buf.read())
 
 
 # --------------------------------------------------------------------------- [1]
@@ -45,7 +55,7 @@ def plot_feature_correlation(dataset, mask, names, out_dir):
     ax.set_title(f'Матрица корреляций Пирсона ({n} признаков)', fontsize=12)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_01_feature_correlation.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 1: {os.path.basename(path)}")
 
 
@@ -62,7 +72,7 @@ def plot_bhatta_heatmap(df_bhatta, out_dir):
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_02_bhatta_heatmap.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 2: {os.path.basename(path)}")
 
 
@@ -79,7 +89,7 @@ def plot_maha_heatmap(df_maha, out_dir):
     ax.set_xlabel('Класс'); ax.set_ylabel('Класс')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_03_maha_heatmap.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 3: {os.path.basename(path)}")
 
 
@@ -109,7 +119,7 @@ def plot_bhatta_forward(history, sel_names, out_dir):
     ax1.legend(l1 + l2, lb1 + lb2, fontsize=9, loc='lower right')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_04_forward_bhatta.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 4: {os.path.basename(path)}")
 
 
@@ -144,7 +154,7 @@ def plot_knn_forward(history, sel_names, out_dir):
     ax1.legend(l1 + l2, lb1 + lb2, fontsize=9, loc='lower right')
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_05_forward_knn.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 5: {os.path.basename(path)}")
 
 
@@ -177,7 +187,7 @@ def plot_window_frequency(sel_b_names, sel_m_names, out_dir):
                  fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_06_window_frequency.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 6: {os.path.basename(path)}")
 
 
@@ -232,5 +242,5 @@ def plot_criteria_agreement(sel_b_names, sel_m_names, names, out_dir):
                  fontsize=12, fontweight='bold', pad=20)
     plt.tight_layout()
     path = os.path.join(out_dir, 'graph_07_criteria_agreement.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight'); plt.close()
+    _savefig(path)
     print(f"    Рисунок 7: {os.path.basename(path)}")

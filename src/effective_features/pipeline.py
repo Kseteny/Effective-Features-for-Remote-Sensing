@@ -168,7 +168,7 @@ def run(cfg: ExperimentConfig = None):
             print(f"\n  Согласованные ({len(common)}): {sorted(common)}")
 
     # --- ХРОНОМЕТРАЖ ---
-    print("\n" + "─" * 60 + "\n⏱  ХРОНОМЕТРАЖ\n" + "─" * 60)
+    print("\n" + "─" * 60 + "\n  ХРОНОМЕТРАЖ\n" + "─" * 60)
     for stage, sec in timings.items():
         bar = '█' * max(1, int(40 * sec / total))
         print(f"  {stage:<22s} {_fmt(sec):>12s}  {bar}")
