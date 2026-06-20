@@ -25,17 +25,52 @@ from . import visualize as viz
 
 
 class _Tee:
-    """Дублирует вывод в консоль и в файл results.txt."""
+    """
+    Дублирует stdout в консоль и в файл results.txt.
+    Безопасен для библиотек (matplotlib/PIL), которые обращаются к fileno():
+    fileno() и прочие атрибуты делегируются реальному stdout.
+    """
     def __init__(self, filepath):
         self._file   = open(filepath, 'w', encoding='utf-8')
         self._stdout = sys.stdout
+        self._closed = False
         sys.stdout   = self
+
     def write(self, data):
-        self._stdout.write(data); self._file.write(data)
+        self._stdout.write(data)
+        if not self._closed:
+            try:
+                self._file.write(data)
+            except (ValueError, OSError):
+                pass
+
     def flush(self):
-        self._stdout.flush(); self._file.flush()
+        try:
+            self._stdout.flush()
+        except (ValueError, OSError):
+            pass
+        if not self._closed:
+            try:
+                self._file.flush()
+            except (ValueError, OSError):
+                pass
+
+    def fileno(self):
+        # Нужен matplotlib/PIL: отдаём дескриптор реального stdout
+        return self._stdout.fileno()
+
+    def isatty(self):
+        return getattr(self._stdout, 'isatty', lambda: False)()
+
+    def __getattr__(self, name):
+        # Любой неизвестный атрибут берём у реального stdout
+        return getattr(self._stdout, name)
+
     def close(self):
-        sys.stdout = self._stdout; self._file.close()
+        if not self._closed:
+            sys.stdout = self._stdout
+            self._file.close()
+            self._closed = True
 
 
 def _fmt(seconds):
@@ -170,8 +205,8 @@ def run(cfg: ExperimentConfig = None):
     # --- ХРОНОМЕТРАЖ ---
     print("\n" + "─" * 60 + "\n  ХРОНОМЕТРАЖ\n" + "─" * 60)
     for stage, sec in timings.items():
-        bar = '█' * max(1, int(40 * sec / total))
-        print(f"  {stage:<22s} {_fmt(sec):>12s}  {bar}")
+        pct = 100 * sec / total if total > 0 else 0
+        print(f"  {stage:<22s} {_fmt(sec):>12s}   ({pct:4.1f}%)")
     # отдельно — сравнение времени критериев (важно для выводов!)
     if all('time' in r for r in results_by_method.values()) and len(results_by_method) >= 2:
         print("\n  Сравнение критериев по времени:")

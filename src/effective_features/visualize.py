@@ -221,12 +221,15 @@ def plot_criteria_agreement(sel_b_names, sel_m_names, names, out_dir):
     ax.set_xticks(range(len(ordered)))
     ax.set_xticklabels(ordered, rotation=45, ha='right', fontsize=8)
     ax.set_yticks([])
+    # тонкие разделители между каждым признаком
+    for i in range(1, len(ordered)):
+        ax.axvline(i - 0.5, color='black', lw=0.4, zorder=2)
     pos = 0
     for g in order:
         feats = groups.get(g, [])
         if feats:
             if pos > 0:
-                ax.axvline(pos - 0.5, color='black', lw=2)
+                ax.axvline(pos - 0.5, color='black', lw=2, zorder=3)
             ax.text(pos + len(feats) / 2 - 0.5, -0.7, g, ha='center', va='top',
                     fontsize=9, fontweight='bold', transform=ax.get_xaxis_transform())
             pos += len(feats)
