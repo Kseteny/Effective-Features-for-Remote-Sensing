@@ -52,15 +52,34 @@ def _choose_mode():
 
 def _choose_seeds():
     """
-    Запрос seed(ов). Можно ввести один (одиночный прогон)
-    или несколько через пробел (серия с сравнением).
+    Запрос seed(ов). Варианты ввода:
+      • одно число        → одиночный запуск (напр.: 42)
+      • несколько чисел   → серия со сравнением (напр.: 1 2 3 4 5)
+      • 'rand' или 'r'    → случайные сиды (спросит, сколько)
+      • Enter             → 42 (по умолчанию)
+
+    Случайные сиды печатаются и сохраняются — эксперимент остаётся
+    воспроизводимым (можно вписать те же числа повторно).
     """
+    import random as _random
     print("\n  Введите seed(ы):")
     print("    • одно число   → одиночный запуск (напр.: 42)")
-    print("    • через пробел → серия запусков со сравнением (напр.: 1 2 3 4 5)")
-    raw = input("  Seeds (Enter = 42): ").strip()
+    print("    • через пробел → серия со сравнением (напр.: 1 2 3 4 5)")
+    print("    • rand         → случайные сиды (спросит количество)")
+    raw = input("  Seeds (Enter = 42): ").strip().lower()
+
     if not raw:
         return [42]
+
+    # Случайные сиды
+    if raw in ('rand', 'r', 'random', 'рандом'):
+        cnt_in = input("  Сколько случайных сидов? (Enter = 5): ").strip()
+        count = int(cnt_in) if cnt_in.isdigit() and int(cnt_in) > 0 else 5
+        seeds = _random.sample(range(1, 10000), count)
+        print(f"\n  Сгенерированы случайные сиды: {seeds}")
+        print(f"  (запиши их, если захочешь повторить этот эксперимент)")
+        return seeds
+
     seeds = [int(s) for s in raw.split() if s.lstrip('-').isdigit()]
     return seeds or [42]
 
@@ -125,10 +144,18 @@ if __name__ == "__main__":
             print(f"  Неизвестный режим '{mode}'. Доступны: {', '.join(PRESETS)}")
             sys.exit(1)
         if len(args) >= 2:
-            seeds = [int(s) for s in args[1:] if s.lstrip('-').isdigit()]
-            if not seeds:
-                print("  Seeds должны быть целыми числами.")
-                sys.exit(1)
+            # Поддержка: research rand [N]  → N случайных сидов
+            if args[1].lower() in ('rand', 'r', 'random'):
+                import random as _random
+                count = int(args[2]) if len(args) >= 3 and args[2].isdigit() else 5
+                seeds = _random.sample(range(1, 10000), count)
+                print(f"  Сгенерированы случайные сиды: {seeds}")
+                print(f"  (запиши их для воспроизводимости)")
+            else:
+                seeds = [int(s) for s in args[1:] if s.lstrip('-').isdigit()]
+                if not seeds:
+                    print("  Seeds должны быть целыми числами или 'rand'.")
+                    sys.exit(1)
         else:
             seeds = [42]
 

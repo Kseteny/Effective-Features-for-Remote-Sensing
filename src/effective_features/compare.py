@@ -226,20 +226,44 @@ def write_summary(agg, out_dir):
             lines.append(f"     {f:<16s}  {freq[f]}/{n}")
         lines.append("")
 
-    # Сравнение ядер двух критериев
-    core_b = {f for f, c in agg['freq']['bhattacharyya'].items() if _classify(c, n) == 'ядро'}
-    core_k = {f for f, c in agg['freq']['knn'].items() if _classify(c, n) == 'ядро'}
-    common_core = core_b & core_k
+    # Сравнение ядер двух критериев — ТРИ УРОВНЯ согласованности
+    freq_b = agg['freq']['bhattacharyya']
+    freq_k = agg['freq']['knn']
+
+    core_b = {f for f, c in freq_b.items() if _classify(c, n) == 'ядро'}
+    core_k = {f for f, c in freq_k.items() if _classify(c, n) == 'ядро'}
+
+    # Уровень 1 (строгий): оба выбрали ВО ВСЕХ запусках
+    strict = core_b & core_k
+    # Уровень 2 (практический): оба выбрали в БОЛЬШИНСТВЕ (>= половины)
+    half = n / 2
+    majority = {f for f in (set(freq_b) & set(freq_k))
+                if freq_b[f] >= half and freq_k[f] >= half}
+    # Уровень 3 (широкий): выбран обоими хотя бы раз
+    ever = set(freq_b) & set(freq_k)
+
     lines.append("=" * 70)
-    lines.append("  СОГЛАСОВАННОСТЬ ЯДЕР ДВУХ КРИТЕРИЕВ")
+    lines.append("  СОГЛАСОВАННОСТЬ КРИТЕРИЕВ (три уровня)")
     lines.append("=" * 70)
-    lines.append(f"  Ядро Бхаттачарьи: {sorted(core_b)}")
-    lines.append(f"  Ядро kNN:         {sorted(core_k)}")
-    lines.append(f"  ОБЩЕЕ ЯДРО ({len(common_core)}): {sorted(common_core)}")
+    lines.append(f"  Ядро Бхаттачарьи (всегда): {sorted(core_b)}")
+    lines.append(f"  Ядро kNN (всегда):         {sorted(core_k)}")
     lines.append("")
-    lines.append("  Вывод: признаки общего ядра выбираются обоими критериями")
-    lines.append("  независимо от случайной выборки — это наиболее надёжные")
-    lines.append("  признаки для классификации.")
+    lines.append(f"  [1] СТРОГОЕ согласие — оба выбирают во ВСЕХ {n} запусках ({len(strict)}):")
+    lines.append(f"      {sorted(strict)}")
+    lines.append("")
+    lines.append(f"  [2] СОГЛАСИЕ БОЛЬШИНСТВА — оба выбирают в >= {int(half)+ (1 if half%1 else 0)}/{n} запусках ({len(majority)}):")
+    lines.append(f"      {sorted(majority)}")
+    lines.append("")
+    lines.append(f"  [3] ШИРОКОЕ согласие — выбран обоими хотя бы раз ({len(ever)}):")
+    lines.append(f"      {sorted(ever)}")
+    lines.append("")
+    lines.append("  Интерпретация:")
+    lines.append("    [1] нижняя граница — признаки, надёжные при любой выборке;")
+    lines.append("    [2] практический набор — реальная согласованность методов;")
+    lines.append("    [3] верхняя граница — все совместно отмеченные признаки.")
+    lines.append("    Чем больше уровень [2], тем сильнее filter-метод (по формулам)")
+    lines.append("    воспроизводит результат wrapper-метода (kNN) — что подтверждает")
+    lines.append("    возможность отбора признаков без обучения классификатора.")
     lines.append("=" * 70)
 
     text = "\n".join(lines)
@@ -291,6 +315,26 @@ def write_ranking_csv(agg, out_dir, sep=';'):
         avg = _avg_step(steps_b.get(f, []) + steps_k.get(f, [])) or 99
         return (-total_count, avg)
 
+    half = n / 2
+
+    def _agreement(cb, ck):
+        """
+        Согласие методов по признаку:
+          'оба'              — оба выбирают часто (>= половины запусков);
+          'только Бхаттач.'  — берёт фильтр, kNN почти нет;
+          'только kNN'       — берёт kNN, фильтр почти нет;
+          'редко'            — оба берут редко.
+        """
+        b_often = cb >= half
+        k_often = ck >= half
+        if b_often and k_often:
+            return 'оба'
+        if b_often and not k_often:
+            return 'только Бхаттач.'
+        if k_often and not b_often:
+            return 'только kNN'
+        return 'редко'
+
     rows = []
     for f in sorted(all_feats, key=_sort_key):
         cb, ck = freq_b.get(f, 0), freq_k.get(f, 0)
@@ -303,11 +347,12 @@ def write_ranking_csv(agg, out_dir, sep=';'):
             'knn_count': f"{ck}/{n}",
             'knn_avg_step': _num(_avg_step(steps_k.get(f, []))),
             'category': category,
+            'agreement': _agreement(cb, ck),
         })
 
     path = os.path.join(out_dir, 'feature_ranking.csv')
     cols = ['feature', 'group', 'bhatta_count', 'bhatta_avg_step',
-            'knn_count', 'knn_avg_step', 'category']
+            'knn_count', 'knn_avg_step', 'category', 'agreement']
     with open(path, 'w', newline='', encoding='utf-8-sig') as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter=sep)
         w.writeheader()
