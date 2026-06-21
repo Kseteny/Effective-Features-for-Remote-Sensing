@@ -210,10 +210,67 @@ def normalize_channels(raw_img):
     return np.moveaxis(img, -1, 0)
 
 
+def _patch_cache_path(cfg, s2_name):
+    """
+    Путь к кеш-файлу признаков патча.
+    Имя кодирует и патч, и конфигурацию признаков (окна/спектральность),
+    чтобы при смене параметров не подхватился несовместимый кеш.
+    """
+    base = os.path.splitext(os.path.basename(s2_name.strip()))[0]
+    return os.path.join(cfg.cache_dir, f"{base}__{cfg.cache_key()}.npz")
+
+
+def _compute_patch_features(raw_img, cfg):
+    """Вычисление куба признаков патча (без кеша)."""
+    if raw_img.ndim == 3 and cfg.use_spectral:
+        img_norm = normalize_channels(raw_img)
+        feat_dict = extract_all_features(img_norm, cfg)
+    else:
+        gray = np.mean(raw_img, axis=0) if raw_img.ndim == 3 else raw_img.squeeze()
+        mn, mx = gray.min(), gray.max()
+        gray = ((gray - mn) / (mx - mn + 1e-8) * 255).astype(np.float32)
+        feat_dict = extract_all_features(gray, cfg)
+    return make_feature_sandwich(feat_dict)   # (cube, names)
+
+
+def get_patch_features(cfg, s2_name, raw_img):
+    """
+    Возвращает (cube, names) признаков патча, используя кеш по правилам:
+      force_recompute=True → считаем заново, обновляем кеш (если save_cache);
+      use_cache=True       → пробуем прочитать из кеша, иначе считаем;
+      иначе                → считаем на лету.
+    """
+    cache_path = _patch_cache_path(cfg, s2_name)
+
+    # 1) Чтение из кеша (если разрешено и не форсим пересчёт)
+    if cfg.use_cache and not cfg.force_recompute and os.path.isfile(cache_path):
+        try:
+            data = np.load(cache_path, allow_pickle=True)
+            cube = data['cube']
+            names = list(data['names'])
+            print(f"    [кеш] признаки загружены из {os.path.basename(cache_path)}")
+            return cube, names
+        except Exception as e:
+            print(f"    [кеш] повреждён ({e}), пересчитываю")
+
+    # 2) Вычисление
+    cube, names = _compute_patch_features(raw_img, cfg)
+
+    # 3) Сохранение в кеш
+    if cfg.save_cache:
+        try:
+            np.savez_compressed(cache_path, cube=cube, names=np.array(names, dtype=object))
+        except Exception as e:
+            print(f"    [кеш] не удалось сохранить: {e}")
+
+    return cube, names
+
+
 def load_all_data(cfg: ExperimentConfig):
     """
     Полный цикл загрузки: патчи → признаки → объединённая выборка (X, y, names).
     Читает РЕАЛЬНЫЙ датасет MultiSenGE из data/ и lists/.
+    Признаки патчей кешируются (см. cfg.use_cache / save_cache / force_recompute).
     """
     if not HAS_RASTERIO:
         raise RuntimeError("rasterio не установлен. pip install rasterio")
@@ -228,22 +285,27 @@ def load_all_data(cfg: ExperimentConfig):
 
     pairs = select_pairs(cfg, lists_dir)
 
+    cache_mode = ('пересчёт+кеш' if cfg.force_recompute else
+                  'кеш' if cfg.use_cache else 'без кеша')
+    print(f"  Режим признаков: {cache_mode}")
+
+    n_from_cache = n_computed = 0
     X_global = y_global = names = None
     for idx, (s2_name, gr_name) in enumerate(pairs, 1):
         print(f"\n  Патч {idx}/{len(pairs)}: {s2_name}")
         try:
+            cache_path = _patch_cache_path(cfg, s2_name)
+            cached = (cfg.use_cache and not cfg.force_recompute
+                      and os.path.isfile(cache_path))
+
+            # Маску надо прочитать всегда (она не кешируется — лёгкая)
             raw_img, patch_mask = load_pair(s2_name, gr_name, data_dir)
 
-            if raw_img.ndim == 3 and cfg.use_spectral:
-                img_norm = normalize_channels(raw_img)
-                feat_dict = extract_all_features(img_norm, cfg)
+            cube, patch_names = get_patch_features(cfg, s2_name, raw_img)
+            if cached:
+                n_from_cache += 1
             else:
-                gray = np.mean(raw_img, axis=0) if raw_img.ndim == 3 else raw_img.squeeze()
-                mn, mx = gray.min(), gray.max()
-                gray = ((gray - mn) / (mx - mn + 1e-8) * 255).astype(np.float32)
-                feat_dict = extract_all_features(gray, cfg)
-
-            cube, patch_names = make_feature_sandwich(feat_dict)
+                n_computed += 1
 
             if patch_mask.shape != cube.shape[:2]:
                 patch_mask = zoom(
@@ -265,6 +327,8 @@ def load_all_data(cfg: ExperimentConfig):
 
         except Exception as e:
             print(f"  Ошибка патча {s2_name}: {e}")
+
+    print(f"\n  Признаки: из кеша {n_from_cache}, посчитано {n_computed}")
 
     if X_global is None or len(X_global) < 100:
         raise RuntimeError("Данные не загружены. Проверьте data/ и lists/.")

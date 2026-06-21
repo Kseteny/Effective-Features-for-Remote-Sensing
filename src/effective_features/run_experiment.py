@@ -56,7 +56,7 @@ def _choose_seeds():
       • одно число        → одиночный запуск (напр.: 42)
       • несколько чисел   → серия со сравнением (напр.: 1 2 3 4 5)
       • 'rand' или 'r'    → случайные сиды (спросит, сколько)
-      • Enter             → 42 (по умолчанию)
+      • Enter             → один случайный seed (выводится на экран)
 
     Случайные сиды печатаются и сохраняются — эксперимент остаётся
     воспроизводимым (можно вписать те же числа повторно).
@@ -66,10 +66,12 @@ def _choose_seeds():
     print("    • одно число   → одиночный запуск (напр.: 42)")
     print("    • через пробел → серия со сравнением (напр.: 1 2 3 4 5)")
     print("    • rand         → случайные сиды (спросит количество)")
-    raw = input("  Seeds (Enter = 42): ").strip().lower()
+    raw = input("  Seeds (Enter = случайный): ").strip().lower()
 
     if not raw:
-        return [42]
+        seed = _random.randint(1, 9999)
+        print(f"  Случайный seed: {seed}  (запиши, если захочешь повторить)")
+        return [seed]
 
     # Случайные сиды
     if raw in ('rand', 'r', 'random', 'рандом'):
@@ -95,19 +97,24 @@ def _single_run(mode, seed):
 def _batch_run(mode, seeds):
     """Серия запусков по seed + автоматическое сравнение."""
     import os
+    import time
     print("=" * 70)
     print(f"  СЕРИЯ ЗАПУСКОВ: режим '{mode}', seeds={seeds}")
     print("=" * 70)
 
+    t_series = time.perf_counter()
     runs = []
+    per_run_times = {}      # {seed: время запуска в секундах}
     project_root = None
     for idx, seed in enumerate(seeds, 1):
         tag = f"{mode}_seed{seed}"
         print(f"\n\n{'#' * 70}")
         print(f"#  ЗАПУСК {idx}/{len(seeds)} — seed={seed}  (папка: results/{tag}/)")
         print(f"{'#' * 70}")
+        _t = time.perf_counter()
         cfg = replace(PRESETS[mode], random_seed=seed, run_tag=tag)
         res = run(cfg)
+        per_run_times[seed] = time.perf_counter() - _t
         runs.append({
             'seed': seed,
             'bhattacharyya': res['results'].get('bhattacharyya', {}).get('names', []),
@@ -116,11 +123,16 @@ def _batch_run(mode, seeds):
         if project_root is None:
             project_root = cfg.project_root
 
+    total_series = time.perf_counter() - t_series
+
     comparison_dir = os.path.join(project_root, 'results', f'{mode}_comparison')
     print(f"\n\n{'=' * 70}")
     print(f"  СРАВНЕНИЕ {len(seeds)} ЗАПУСКОВ → results/{mode}_comparison/")
     print(f"{'=' * 70}")
-    compare_runs(runs, comparison_dir)
+    # Передаём тайминги серии в сравнение — попадут в summary.txt
+    compare_runs(runs, comparison_dir,
+                 series_time=total_series, per_run_times=per_run_times,
+                 mode=mode)
     print(f"\n  Готово! Результаты: results/{mode}_seed*/  и  results/{mode}_comparison/")
 
 
@@ -157,6 +169,9 @@ if __name__ == "__main__":
                     print("  Seeds должны быть целыми числами или 'rand'.")
                     sys.exit(1)
         else:
-            seeds = [42]
+            import random as _random
+            seed = _random.randint(1, 9999)
+            print(f"  Seed не указан, используется случайный: {seed}")
+            seeds = [seed]
 
     main(mode, seeds)

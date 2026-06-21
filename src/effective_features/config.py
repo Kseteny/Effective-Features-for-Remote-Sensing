@@ -6,10 +6,36 @@ EFFECTIVE-FEATURES: инструмент сравнительного анали
 """
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
+
+
+def _ensure_dir(path, attempts=3):
+    """
+    Надёжно создаёт папку (включая все родительские).
+    На Windows с OneDrive/антивирусом makedirs иногда срабатывает не сразу —
+    делаем несколько попыток. При неудаче — понятное сообщение.
+    """
+    path = os.path.abspath(path)
+    last_err = None
+    for i in range(attempts):
+        try:
+            os.makedirs(path, exist_ok=True)
+            if os.path.isdir(path):
+                return path
+        except OSError as e:
+            last_err = e
+            time.sleep(0.3)
+    # Последняя попытка — пробросить понятную ошибку
+    raise OSError(
+        f"Не удалось создать папку:\n  {path}\n"
+        f"Возможные причины: путь синхронизируется OneDrive, нет прав, "
+        f"или мешает антивирус. Попробуйте переместить проект в локальную "
+        f"папку вне OneDrive (например C:\\Projects\\). Исходная ошибка: {last_err}"
+    )
 
 
 # ===========================================================================
@@ -49,6 +75,17 @@ class ExperimentConfig:
     knn_cv: int = 5                           # число фолдов CV
     knn_max_samples: Optional[int] = 20_000   # лимит выборки только для kNN
 
+    # --- Кеширование признаков патчей ---
+    # Признаки патча не меняются между запусками, поэтому их можно
+    # посчитать один раз и переиспользовать (особенно полезно при сериях
+    # с разными seed, где патчи частично пересекаются, и на полном датасете).
+    use_cache: bool = True        # читать готовые признаки из кеша
+    save_cache: bool = True       # сохранять посчитанные признаки в кеш
+    force_recompute: bool = False # пересчитать заново, игнорируя чтение
+    #   force_recompute=True перебивает use_cache: признаки считаются заново
+    #   и кеш ОБНОВЛЯЕТСЯ (если save_cache=True). Нужно при смене формул.
+    cache_dir: Optional[str] = None   # папка кеша (по умолч. <root>/cache)
+
     # --- Пути (если None — определяются автоматически) ---
     project_root: Optional[str] = None
     output_dir: Optional[str] = None
@@ -71,9 +108,12 @@ class ExperimentConfig:
             self.project_root = os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(base_file))))
 
+        # Корневая папка results/ — создаём в первую очередь
+        results_root = os.path.join(self.project_root, 'results')
+
         if self.run_tag:
-            # Изолированная папка под этот запуск
-            base = os.path.join(self.project_root, 'results', self.run_tag)
+            # Изолированная папка под этот запуск: results/<run_tag>/
+            base = os.path.join(results_root, self.run_tag)
             if self.results_dir is None:
                 self.results_dir = base
             if self.output_dir is None:
@@ -82,11 +122,30 @@ class ExperimentConfig:
             if self.output_dir is None:
                 self.output_dir = os.path.join(self.project_root, 'output')
             if self.results_dir is None:
-                self.results_dir = os.path.join(self.project_root, 'results')
+                self.results_dir = results_root
 
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.results_dir, exist_ok=True)
+        # Надёжное создание папок (Windows + OneDrive иногда мешают —
+        # делаем несколько попыток и даём понятную ошибку)
+        for target in (results_root, self.results_dir, self.output_dir):
+            _ensure_dir(target)
+
+        # Папка кеша признаков
+        if self.cache_dir is None:
+            self.cache_dir = os.path.join(self.project_root, 'cache')
+        if self.use_cache or self.save_cache:
+            _ensure_dir(self.cache_dir)
         return self
+
+    def cache_key(self):
+        """
+        Идентификатор конфигурации признаков для имени кеш-файла.
+        Кеш валиден только при тех же параметрах признакового пространства
+        (окна + спектральность). При их изменении ключ другой — старый кеш
+        не подхватится, т.к. признаки были бы иными.
+        """
+        windows = '-'.join(str(w) for w in self.window_sizes)
+        spec = 'spec' if self.use_spectral else 'nospec'
+        return f"w{windows}_{spec}"
 
 
 # ===========================================================================

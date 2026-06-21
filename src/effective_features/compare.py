@@ -186,7 +186,7 @@ def plot_stability_heatmap(per_seed_method, seeds, all_features, method_name, ou
     print(f"    График: {os.path.basename(path)}")
 
 
-def write_summary(agg, out_dir):
+def write_summary(agg, out_dir, series_time=None, per_run_times=None, mode=None):
     """Текстовая сводка с выводами по устойчивости отбора."""
     path = os.path.join(out_dir, 'summary.txt')
     n = agg['n_runs']
@@ -195,8 +195,15 @@ def write_summary(agg, out_dir):
     lines.append("=" * 70)
     lines.append("  СВОДКА ПО СЕРИИ ЗАПУСКОВ (устойчивость отбора признаков)")
     lines.append("=" * 70)
+    if mode:
+        lines.append(f"  Режим:    {mode}")
     lines.append(f"  Запусков: {n}")
     lines.append(f"  Seeds:    {seeds}")
+    if per_run_times:
+        for s, t in per_run_times.items():
+            lines.append(f"    seed={s}: {t:.1f} сек")
+    if series_time is not None:
+        lines.append(f"  Итого:    {series_time:.1f} сек")
     lines.append("")
 
     for method in ['bhattacharyya', 'knn']:
@@ -379,7 +386,7 @@ def write_per_seed_csv(agg, runs, out_dir, sep=';'):
 
 
 
-def compare_runs(runs, comparison_dir):
+def compare_runs(runs, comparison_dir, series_time=None, per_run_times=None, mode=None):
     """
     Главная функция сравнения.
     runs — список {'seed', 'bhattacharyya', 'knn'}.
@@ -401,5 +408,6 @@ def compare_runs(runs, comparison_dir):
     write_per_seed_csv(agg, runs, comparison_dir)
 
     print("\n" + "─" * 60 + "\nСводка\n" + "─" * 60)
-    write_summary(agg, comparison_dir)
+    write_summary(agg, comparison_dir,
+                  series_time=series_time, per_run_times=per_run_times, mode=mode)
     return agg
