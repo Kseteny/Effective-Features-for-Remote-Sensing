@@ -349,17 +349,17 @@ def write_ranking_csv(agg, out_dir, sep=';'):
         rows.append({
             'feature': f,
             'group': _grp(f),
-            'bhatta_count': f"{cb}/{n}",
+            f'bhatta_count_из{n}': cb,
             'bhatta_avg_step': _num(_avg_step(steps_b.get(f, []))),
-            'knn_count': f"{ck}/{n}",
+            f'knn_count_из{n}': ck,
             'knn_avg_step': _num(_avg_step(steps_k.get(f, []))),
             'category': category,
             'agreement': _agreement(cb, ck),
         })
 
     path = os.path.join(out_dir, 'feature_ranking.csv')
-    cols = ['feature', 'group', 'bhatta_count', 'bhatta_avg_step',
-            'knn_count', 'knn_avg_step', 'category', 'agreement']
+    cols = ['feature', 'group', f'bhatta_count_из{n}', 'bhatta_avg_step',
+            f'knn_count_из{n}', 'knn_avg_step', 'category', 'agreement']
     with open(path, 'w', newline='', encoding='utf-8-sig') as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter=sep)
         w.writeheader()
