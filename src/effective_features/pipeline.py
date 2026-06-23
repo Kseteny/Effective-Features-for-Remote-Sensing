@@ -20,6 +20,7 @@ from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube, parse_feature_window
 from .selectors import (
     calculate_class_stats, compute_all_pairwise_distances, SELECTOR_REGISTRY,
+    evaluate_feature_set,
 )
 from . import visualize as viz
 
@@ -110,7 +111,7 @@ def run(cfg: ExperimentConfig = None):
     _t = time.perf_counter()
     X_global, y_global, names = load_all_data(cfg)
     timings['Загрузка данных'] = time.perf_counter() - _t
-    print(f"    Загрузка: {_fmt(timings['Загрузка данных'])}")
+    print(f"  ⏱  Загрузка: {_fmt(timings['Загрузка данных'])}")
 
     # --- ШАГ 2: Субдискретизация ---
     print("\n" + "─" * 60 + "\nШАГ 2: Субдискретизация\n" + "─" * 60)
@@ -139,7 +140,7 @@ def run(cfg: ExperimentConfig = None):
     print("\n  D_B:\n" + df_bhatt.round(3).to_string())
     print("\n  D_M:\n" + df_maha.round(3).to_string())
     timings['Расстояния'] = time.perf_counter() - _t
-    print(f"\n    Расстояния: {_fmt(timings['Расстояния'])}")
+    print(f"\n  ⏱  Расстояния: {_fmt(timings['Расстояния'])}")
 
     # --- ШАГ 4: Отбор по всем критериям из реестра ---
     print("\n" + "─" * 60 + "\nШАГ 4: Отбор признаков (все критерии)\n" + "─" * 60)
@@ -163,13 +164,25 @@ def run(cfg: ExperimentConfig = None):
             sel, hist = func(dataset, mask, cfg)
         elapsed = time.perf_counter() - _tm
         sel_names = [names[i] for i in sel]
+
+        # Оценка эффективности набора на контрольной выборке
+        eval_res = evaluate_feature_set(
+            dataset, mask, sel, cfg,
+            target_classes=[int(c) for c in unique_cls])
+
         results_by_method[method_name] = {
             'indices': sel, 'history': hist, 'names': sel_names,
             'kind': spec['kind'], 'metric': spec['metric_name'],
-            'time': elapsed,
+            'time': elapsed, 'eval': eval_res,
         }
         print(f"  {method_name}: {sel_names}")
-        print(f"    {method_name}: {_fmt(elapsed)}")
+        print(f"  ⏱  {method_name}: {_fmt(elapsed)}")
+        if eval_res:
+            print(f"  Эффективность набора ({eval_res['n_features']} призн.): "
+                  f"точность {eval_res['accuracy']*100:.1f}%, "
+                  f"ошибка {eval_res['error_rate']*100:.1f}%, "
+                  f"F1={eval_res['f1_macro']:.3f} "
+                  f"(контроль {eval_res['n_test']:,} пкс)")
     timings['Отбор признаков'] = time.perf_counter() - _t
 
     # --- ШАГ 5: Графики ---
@@ -201,6 +214,17 @@ def run(cfg: ExperimentConfig = None):
         common = set(sel_b_names) & set(sel_m_names)
         if common:
             print(f"\n  Согласованные ({len(common)}): {sorted(common)}")
+
+    # --- ЭФФЕКТИВНОСТЬ НАБОРОВ (на контрольной выборке) ---
+    print("\n" + "─" * 60 + "\n  ЭФФЕКТИВНОСТЬ НАБОРОВ (контрольная выборка)\n" + "─" * 60)
+    for method_name, r in results_by_method.items():
+        ev = r.get('eval')
+        if ev:
+            print(f"  {method_name:<16s} {ev['n_features']:>2d} призн.:  "
+                  f"точность {ev['accuracy']*100:5.1f}%   "
+                  f"ошибка {ev['error_rate']*100:4.1f}%   "
+                  f"F1={ev['f1_macro']:.3f}")
+    print(f"  (обучение на 70%, проверка на 30% контрольных пикселей)")
 
     # --- ХРОНОМЕТРАЖ ---
     print("\n" + "─" * 60 + "\n  ХРОНОМЕТРАЖ\n" + "─" * 60)

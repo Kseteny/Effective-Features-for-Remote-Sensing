@@ -17,7 +17,8 @@ import pandas as pd
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import accuracy_score, f1_score
 
 from .config import ExperimentConfig, CLASS_NAMES
 
@@ -270,6 +271,86 @@ def forward_selection_knn(dataset, mask, cfg: ExperimentConfig, target_classes=N
         history.append(cur)
         print(f"  Шаг {step + 1}: признак #{best_f:>2d}, Acc={cur:.4f} (+{best_g:.4f})")
     return selected, history
+
+
+# ===========================================================================
+# ОЦЕНКА ЭФФЕКТИВНОСТИ ОТОБРАННОГО НАБОРА ПРИЗНАКОВ
+# ===========================================================================
+def evaluate_feature_set(dataset, mask, feature_indices, cfg: ExperimentConfig,
+                         target_classes=None):
+    """
+    Оценивает качество классификации по отобранному набору признаков
+    на ОТДЕЛЬНОЙ контрольной выборке (которую классификатор не видел при
+    обучении). Это прямой ответ на вопрос об эффективности признаков и
+    вероятности ошибки.
+
+    Схема:
+      1. данные делятся на обучающую (70%) и контрольную (30%) части
+         со стратификацией (пропорции классов сохраняются);
+      2. на обучающей части обучается kNN по выбранным признакам;
+      3. на контрольной части измеряются точность и доля ошибок.
+
+    Возвращает словарь:
+      n_features  — число признаков в наборе
+      accuracy    — доля верных ответов на контрольной выборке (0..1)
+      error_rate  — вероятность ошибки = 1 − accuracy
+      f1_macro    — F1-мера (усреднённая по классам, учитывает дисбаланс)
+      n_train, n_test — размеры выборок
+    """
+    if not feature_indices:
+        return None
+
+    c = dataset.shape[-1]
+    flat = mask.flatten()
+    X_all = dataset.reshape(-1, c)[flat > 0]
+    y_all = flat[flat > 0]
+
+    if target_classes is not None:
+        sel = np.isin(y_all, target_classes)
+        X_all, y_all = X_all[sel], y_all[sel]
+
+    # Ограничиваем объём для скорости (стратифицированно)
+    if cfg.knn_max_samples is not None and len(X_all) > cfg.knn_max_samples:
+        X_all, y_all = stratified_subsample(
+            X_all, y_all, cfg.knn_max_samples, cfg.random_seed)
+
+    # Оставляем только отобранные признаки
+    X_sel = X_all[:, feature_indices]
+
+    # Делим на обучающую и контрольную части (контроль = 30%)
+    # Стратификация по классам; редкие классы могут мешать — подстрахуемся
+    try:
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X_sel, y_all, test_size=0.3,
+            random_state=cfg.random_seed, stratify=y_all)
+    except ValueError:
+        # если стратификация невозможна (класс из 1 элемента) — без неё
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X_sel, y_all, test_size=0.3, random_state=cfg.random_seed)
+
+    # Масштабируем по обучающей части, применяем к обеим
+    scaler = StandardScaler().fit(X_tr)
+    X_tr_s = scaler.transform(X_tr)
+    X_te_s = scaler.transform(X_te)
+
+    # Обучаем kNN и оцениваем на контроле
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        clf = KNeighborsClassifier(cfg.knn_k, n_jobs=-1)
+        clf.fit(X_tr_s, y_tr)
+        y_pred = clf.predict(X_te_s)
+
+    acc = float(accuracy_score(y_te, y_pred))
+    f1 = float(f1_score(y_te, y_pred, average='macro'))
+
+    return {
+        'n_features': len(feature_indices),
+        'accuracy': acc,
+        'error_rate': 1.0 - acc,
+        'f1_macro': f1,
+        'n_train': len(y_tr),
+        'n_test': len(y_te),
+    }
 
 
 # ===========================================================================

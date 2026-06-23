@@ -35,19 +35,20 @@ DESCRIPTIONS = {
 
 
 def _choose_mode():
-    """Меню выбора режима."""
+    """Меню выбора режима. В меню показываются fast и research;
+    режим full остаётся доступен вводом названия вручную."""
+    visible = ['fast', 'research']   # что показываем в списке
     print("\n  Выберите режим:\n")
-    modes = list(PRESETS.keys())
-    for i, m in enumerate(modes, 1):
+    for i, m in enumerate(visible, 1):
         print(f"    {i}. {m:<10s} — {DESCRIPTIONS[m]}")
     print()
     while True:
-        choice = input("  Режим (1-3 или название): ").strip().lower()
-        if choice in PRESETS:
+        choice = input("  Режим (1, 2 или название): ").strip().lower()
+        if choice in PRESETS:          # принимает и 'full', если введут вручную
             return choice
-        if choice.isdigit() and 1 <= int(choice) <= len(modes):
-            return modes[int(choice) - 1]
-        print("  Введите 1, 2, 3 или fast / research / full.")
+        if choice.isdigit() and 1 <= int(choice) <= len(visible):
+            return visible[int(choice) - 1]
+        print("  Введите 1, 2 или название режима (fast / research).")
 
 
 def _choose_seeds():
@@ -56,7 +57,7 @@ def _choose_seeds():
       • одно число        → одиночный запуск (напр.: 42)
       • несколько чисел   → серия со сравнением (напр.: 1 2 3 4 5)
       • 'rand' или 'r'    → случайные сиды (спросит, сколько)
-      • Enter             → один случайный seed (выводится на экран)
+      • Enter             → 42 (по умолчанию)
 
     Случайные сиды печатаются и сохраняются — эксперимент остаётся
     воспроизводимым (можно вписать те же числа повторно).
@@ -66,12 +67,10 @@ def _choose_seeds():
     print("    • одно число   → одиночный запуск (напр.: 42)")
     print("    • через пробел → серия со сравнением (напр.: 1 2 3 4 5)")
     print("    • rand         → случайные сиды (спросит количество)")
-    raw = input("  Seeds (Enter = случайный): ").strip().lower()
+    raw = input("  Seeds (Enter = 42): ").strip().lower()
 
     if not raw:
-        seed = _random.randint(1, 9999)
-        print(f"  Случайный seed: {seed}  (запиши, если захочешь повторить)")
-        return [seed]
+        return [42]
 
     # Случайные сиды
     if raw in ('rand', 'r', 'random', 'рандом'):
@@ -169,9 +168,6 @@ if __name__ == "__main__":
                     print("  Seeds должны быть целыми числами или 'rand'.")
                     sys.exit(1)
         else:
-            import random as _random
-            seed = _random.randint(1, 9999)
-            print(f"  Seed не указан, используется случайный: {seed}")
-            seeds = [seed]
+            seeds = [42]
 
     main(mode, seeds)
