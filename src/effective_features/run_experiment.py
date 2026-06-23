@@ -118,6 +118,9 @@ def _batch_run(mode, seeds):
             'seed': seed,
             'bhattacharyya': res['results'].get('bhattacharyya', {}).get('names', []),
             'knn': res['results'].get('knn', {}).get('names', []),
+            # эффективность набора каждого метода (для сводки по серии)
+            'eval_bhattacharyya': res['results'].get('bhattacharyya', {}).get('eval'),
+            'eval_knn': res['results'].get('knn', {}).get('eval'),
         })
         if project_root is None:
             project_root = cfg.project_root

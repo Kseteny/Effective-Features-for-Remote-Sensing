@@ -111,7 +111,7 @@ def run(cfg: ExperimentConfig = None):
     _t = time.perf_counter()
     X_global, y_global, names = load_all_data(cfg)
     timings['Загрузка данных'] = time.perf_counter() - _t
-    print(f"  ⏱  Загрузка: {_fmt(timings['Загрузка данных'])}")
+    print(f"    Загрузка: {_fmt(timings['Загрузка данных'])}")
 
     # --- ШАГ 2: Субдискретизация ---
     print("\n" + "─" * 60 + "\nШАГ 2: Субдискретизация\n" + "─" * 60)
@@ -140,7 +140,7 @@ def run(cfg: ExperimentConfig = None):
     print("\n  D_B:\n" + df_bhatt.round(3).to_string())
     print("\n  D_M:\n" + df_maha.round(3).to_string())
     timings['Расстояния'] = time.perf_counter() - _t
-    print(f"\n  ⏱  Расстояния: {_fmt(timings['Расстояния'])}")
+    print(f"\n    Расстояния: {_fmt(timings['Расстояния'])}")
 
     # --- ШАГ 4: Отбор по всем критериям из реестра ---
     print("\n" + "─" * 60 + "\nШАГ 4: Отбор признаков (все критерии)\n" + "─" * 60)
@@ -176,7 +176,7 @@ def run(cfg: ExperimentConfig = None):
             'time': elapsed, 'eval': eval_res,
         }
         print(f"  {method_name}: {sel_names}")
-        print(f"  ⏱  {method_name}: {_fmt(elapsed)}")
+        print(f"    {method_name}: {_fmt(elapsed)}")
         if eval_res:
             print(f"  Эффективность набора ({eval_res['n_features']} призн.): "
                   f"точность {eval_res['accuracy']*100:.1f}%, "
