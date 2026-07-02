@@ -101,7 +101,13 @@ def run(cfg: ExperimentConfig = None):
     print("=" * 70)
     print(f"  Окна:          {cfg.window_sizes}")
     print(f"  Спектральные:  {'да (9)' if cfg.use_spectral else 'нет'}")
-    print(f"  Патчей:        {'весь датасет' if cfg.n_patches is None else cfg.n_patches}")
+    if cfg.use_thinning:
+        patches_line = f'прореживание, шаг ~{cfg.thinning_target_patches}'
+    elif cfg.n_patches is None:
+        patches_line = 'весь датасет'
+    else:
+        patches_line = str(cfg.n_patches)
+    print(f"  Патчей:        {patches_line}")
     print(f"  Лимит выборки: {cfg.max_pixels_total or 'нет'}")
     print(f"  max_features:  {cfg.max_features}")
     print(f"  Графики →      {cfg.output_dir}")
@@ -132,7 +138,9 @@ def run(cfg: ExperimentConfig = None):
     _t = time.perf_counter()
     stats = {}
     for cls in unique_cls:
-        mv, cm = calculate_class_stats(dataset, mask, int(cls))
+        mv, cm = calculate_class_stats(dataset, mask, int(cls),
+                                        max_samples=cfg.bhatta_max_samples,
+                                        seed=cfg.random_seed)
         if mv is not None:
             stats[int(cls)] = {'mean': mv, 'cov': cm}
     classes_list = sorted(stats.keys())

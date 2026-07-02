@@ -17,7 +17,7 @@ import random
 import numpy as np
 from scipy.ndimage import uniform_filter
 
-from .config import ExperimentConfig
+from .config import ExperimentConfig, CLASS_NAMES
 
 try:
     import rasterio
@@ -159,13 +159,82 @@ def get_file_lists(lists_dir):
     return s2, gr
 
 
-def select_pairs(cfg: ExperimentConfig, lists_dir):
-    """cfg.n_patches=None → весь датасет; иначе случайные N патчей."""
+def _read_mask_classes(gr_name, data_dir):
+    """Быстро читает только маску патча и возвращает множество классов
+    в ней (без нулей = фон). Используется только для прореживания —
+    признаки при этом НЕ считаются, так что это дёшево."""
+    with rasterio.open(os.path.join(data_dir, 'ground_reference', gr_name.strip())) as f:
+        mask = f.read(1)
+    return set(np.unique(mask).tolist()) - {0}
+
+
+def select_pairs_thinned(pairs, cfg: ExperimentConfig, data_dir):
+    """
+    Систематическое прореживание (предложено В.В. Сергеевым): вместо
+    случайной выборки патчей берём каждый k-й патч ПО ПОРЯДКУ — это даёт
+    равномерное покрытие датасета без лишней случайности.
+
+    Проблема чистого прореживания: самые редкие классы (напр. Торфяники —
+    ~8 тыс. пикселей на весь датасет из 1911 патчей, Хвойные леса — ~16 тыс.)
+    могут не попасть НИ В ОДИН патч выборки просто по шагу. Поэтому после
+    систематического отбора мы сканируем маски (только слой разметки,
+    без вычисления признаков — быстро) и явно добираем патчи, которые
+    закрывают классы, которых не хватает.
+    """
+    n_total = len(pairs)
+    target = cfg.thinning_target_patches
+    step = max(1, n_total // target)
+    thinned = list(pairs[::step][:target])
+    thinned_set = set(thinned)
+
+    print(f"\n  Прореживание: шаг {step}, взято {len(thinned)} патчей "
+          f"из {n_total} (равномерно по датасету)")
+    print("  Проверка покрытия классов (сканирую маски, без признаков)...")
+
+    covered = set()
+    for s2, gr in thinned:
+        covered |= _read_mask_classes(gr, data_dir)
+
+    all_classes = set(CLASS_NAMES.keys())
+    missing = all_classes - covered
+    if missing:
+        print(f"  Не хватает классов: {sorted(missing)} — ищу патчи, где они есть...")
+        for s2, gr in pairs:
+            if not missing:
+                break
+            if (s2, gr) in thinned_set:
+                continue
+            classes_here = _read_mask_classes(gr, data_dir)
+            found = classes_here & missing
+            if found:
+                thinned.append((s2, gr))
+                thinned_set.add((s2, gr))
+                missing -= found
+                print(f"    + добавлен {s2} (закрывает классы {sorted(found)})")
+        if missing:
+            print(f"  ВНИМАНИЕ: классы {sorted(missing)} не найдены ни в одном патче датасета.")
+
+    print(f"  Итог прореживания: {len(thinned)} патчей, "
+          f"классы покрыты: {sorted(all_classes - missing)}")
+    return thinned
+
+
+def select_pairs(cfg: ExperimentConfig, lists_dir, data_dir=None):
+    """
+    cfg.use_thinning=True → систематическое прореживание с гарантией всех
+    классов (см. select_pairs_thinned);
+    cfg.n_patches=None    → весь датасет;
+    иначе                 → случайные n_patches патчей.
+    """
     s2_list, gr_list = get_file_lists(lists_dir)
     if len(s2_list) != len(gr_list):
         raise ValueError("Количество снимков и масок не совпадает")
 
     pairs = list(zip(s2_list, gr_list))
+
+    if cfg.use_thinning:
+        return select_pairs_thinned(pairs, cfg, data_dir)
+
     if cfg.n_patches is None:
         print(f"\n  Используется ВЕСЬ датасет: {len(pairs)} патчей")
         return pairs
@@ -283,14 +352,16 @@ def load_all_data(cfg: ExperimentConfig):
     if not has_lists:
         raise RuntimeError("Не найдены lists/out_s2_pref.txt и out_gr_pref.txt")
 
-    pairs = select_pairs(cfg, lists_dir)
+    pairs = select_pairs(cfg, lists_dir, data_dir)
 
     cache_mode = ('пересчёт+кеш' if cfg.force_recompute else
                   'кеш' if cfg.use_cache else 'без кеша')
     print(f"  Режим признаков: {cache_mode}")
 
     n_from_cache = n_computed = 0
-    X_global = y_global = names = None
+    names = None
+    X_parts, y_parts = [], []   # копим куски, склеиваем один раз в конце
+    total_pixels = 0
     for idx, (s2_name, gr_name) in enumerate(pairs, 1):
         print(f"\n  Патч {idx}/{len(pairs)}: {s2_name}")
         try:
@@ -318,19 +389,24 @@ def load_all_data(cfg: ExperimentConfig):
             X_patch, y_patch = build_global_dataset(cube, patch_mask)
             if names is None:
                 names = patch_names
-            if X_global is None:
-                X_global, y_global = X_patch, y_patch
-            else:
-                X_global = np.vstack([X_global, X_patch])
-                y_global = np.concatenate([y_global, y_patch])
-            print(f"  +{len(X_patch):,} пкс | итого: {len(X_global):,}")
+            X_parts.append(X_patch)
+            y_parts.append(y_patch)
+            total_pixels += len(X_patch)
+            print(f"  +{len(X_patch):,} пкс | итого: {total_pixels:,}")
 
         except Exception as e:
             print(f"  Ошибка патча {s2_name}: {e}")
 
     print(f"\n  Признаки: из кеша {n_from_cache}, посчитано {n_computed}")
 
-    if X_global is None or len(X_global) < 100:
+    if not X_parts or total_pixels < 100:
         raise RuntimeError("Данные не загружены. Проверьте data/ и lists/.")
+
+    # Один concatenate вместо vstack на каждой итерации: раньше сложность
+    # росла квадратично (на 1911 патчах при полном датасете это критично —
+    # склейка ближе к концу копировала бы уже весь накопленный массив
+    # на каждом шаге), теперь — линейно.
+    X_global = np.concatenate(X_parts, axis=0)
+    y_global = np.concatenate(y_parts, axis=0)
 
     return X_global, y_global, names

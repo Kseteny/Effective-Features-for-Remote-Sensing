@@ -24,31 +24,33 @@ from effective_features.compare import compare_runs
 PRESETS = {
     'fast':     ExperimentConfig(n_patches=10, max_pixels_total=120_000),
     'research': ExperimentConfig(n_patches=50),
+    'thinned':  ExperimentConfig(use_thinning=True, thinning_target_patches=150),
     'full':     ExperimentConfig(),   # n_patches=None → весь датасет
 }
 
 DESCRIPTIONS = {
     'fast':     'Быстрый — 10 патчей, для отладки (пара минут)',
     'research': 'Исследовательский — 50 патчей, основной режим',
+    'thinned':  'Прореживание — ~150 патчей систематически, гарантия всех классов',
     'full':     'Полный — весь датасет, для финального результата (долго)',
 }
 
 
 def _choose_mode():
-    """Меню выбора режима. В меню показываются fast и research;
-    режим full остаётся доступен вводом названия вручную."""
-    visible = ['fast', 'research']   # что показываем в списке
+    """Меню выбора режима: fast, research, thinned, full."""
+    visible = ['fast', 'research', 'thinned', 'full']   # что показываем в списке
     print("\n  Выберите режим:\n")
     for i, m in enumerate(visible, 1):
         print(f"    {i}. {m:<10s} — {DESCRIPTIONS[m]}")
     print()
     while True:
-        choice = input("  Режим (1, 2 или название): ").strip().lower()
-        if choice in PRESETS:          # принимает и 'full', если введут вручную
+        choice = input(f"  Режим (1-{len(visible)} или название): ").strip().lower()
+        if choice in PRESETS:          # принимает и название режима напрямую
             return choice
         if choice.isdigit() and 1 <= int(choice) <= len(visible):
             return visible[int(choice) - 1]
-        print("  Введите 1, 2 или название режима (fast / research).")
+        print(f"  Введите число 1-{len(visible)} или название режима "
+              f"({', '.join(visible)}).")
 
 
 def _choose_seeds():
@@ -151,7 +153,18 @@ if __name__ == "__main__":
     if not args:
         # Интерактив
         mode = _choose_mode()
-        seeds = _choose_seeds()
+        if mode in ('full', 'thinned'):
+            # В этих режимах выбор патчей не случайный (весь датасет либо
+            # систематический шаг + добор редких классов), поэтому серия
+            # по нескольким сидам не имеет смысла — одиночный запуск
+            # с дефолтным seed=42.
+            seeds = [42]
+            note = ('используется весь датасет, все 1911' if mode == 'full'
+                    else 'патчи выбираются систематически, не случайно')
+            print(f"\n  Режим '{mode}': сиды не влияют на выбор патчей "
+                  f"({note}), запуск с seed=42.")
+        else:
+            seeds = _choose_seeds()
     else:
         mode = args[0].strip().lower()
         if mode not in PRESETS:

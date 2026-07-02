@@ -26,14 +26,38 @@ from .config import ExperimentConfig, CLASS_NAMES
 # ===========================================================================
 # СТАТИСТИКА КЛАССОВ И ПОПАРНЫЕ РАССТОЯНИЯ
 # ===========================================================================
-def calculate_class_stats(dataset, mask, class_id):
-    """Вектор средних + ковариационная матрица для пикселей класса."""
+def _cap_class_samples(X, max_samples, seed):
+    """
+    Ограничивает число пикселей класса до max_samples (случайная подвыборка
+    без возврата). Нужно для методов на основе ковариации (Бхаттачарья,
+    Махаланобис) — без этого на классах с десятками миллионов пикселей
+    (напр. леса) np.cov упирается в память и время. Аналог того, что для
+    kNN уже делает stratified_subsample, но здесь класс один, поэтому
+    достаточно простого случайного отбора.
+    """
+    if max_samples is None or len(X) <= max_samples:
+        return X
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(X), size=max_samples, replace=False)
+    return X[idx]
+
+
+def calculate_class_stats(dataset, mask, class_id, max_samples=None, seed=42):
+    """Вектор средних + ковариационная матрица для пикселей класса.
+
+    max_samples ограничивает объём данных для np.cov (см. _cap_class_samples) —
+    иначе на классах с десятками миллионов пикселей расчёт непомерно долгий
+    и может упереться в память.
+    """
     flat = mask.flatten()
     X    = dataset.reshape(-1, dataset.shape[-1])[flat == class_id]
     if len(X) < 5:
         print(f"   Класс {class_id}: недостаточно пикселей ({len(X)})")
         return None, None
-    print(f"   Класс {class_id} ({CLASS_NAMES.get(class_id, '?')}): {len(X)} пкс")
+    n_full = len(X)
+    X = _cap_class_samples(X, max_samples, seed)
+    suffix = f" (подвыборка из {n_full:,})" if len(X) < n_full else ""
+    print(f"   Класс {class_id} ({CLASS_NAMES.get(class_id, '?')}): {len(X):,} пкс{suffix}")
     cov = np.cov(X, rowvar=False)
     if cov.ndim == 0:
         cov = np.array([[float(cov)]])
@@ -118,7 +142,11 @@ def _bhatta_samples(X1, X2):
 def forward_selection_bhatta(dataset, mask, cfg: ExperimentConfig):
     """
     Жадный Forward Selection по критерию расстояния Бхаттачарьи (filter).
-    Параметры из cfg: bhatta_pair, eps, max_features.
+    Параметры из cfg: bhatta_pair, eps, max_features, bhatta_max_samples.
+
+    Выборка каждого класса пары ограничивается cfg.bhatta_max_samples —
+    иначе на классах с десятками миллионов пикселей (напр. леса) np.cov,
+    вызываемый ~max_features×c раз за проход, упирается в память и время.
     Возвращает (selected_indices, history_values).
     """
     target = cfg.bhatta_pair
@@ -130,6 +158,13 @@ def forward_selection_bhatta(dataset, mask, cfg: ExperimentConfig):
     if len(X1) < 10 or len(X2) < 10:
         print(f"     Мало пикселей: C{target[0]}={len(X1)}, C{target[1]}={len(X2)}")
         return [], []
+
+    n1_full, n2_full = len(X1), len(X2)
+    X1 = _cap_class_samples(X1, cfg.bhatta_max_samples, cfg.random_seed)
+    X2 = _cap_class_samples(X2, cfg.bhatta_max_samples, cfg.random_seed)
+    if len(X1) < n1_full or len(X2) < n2_full:
+        print(f"     Подвыборка для Бхаттачарьи: C{target[0]} {n1_full:,}→{len(X1):,}, "
+              f"C{target[1]} {n2_full:,}→{len(X2):,}")
 
     selected, cur, history = [], 0.0, []
     print(f"\n  Forward Selection (Бхаттачарья): классы {target}")
