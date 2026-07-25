@@ -3,6 +3,9 @@
     <nav>
       <NuxtLink to="/">Признаки</NuxtLink>
       <NuxtLink to="/run">Запуск расчёта</NuxtLink>
+      <span class="sep"></span>
+      <NuxtLink to="/docs">О проекте</NuxtLink>
+      <NuxtLink to="/docs/methods">Методы</NuxtLink>
     </nav>
     <NuxtPage />
   </div>
@@ -17,4 +20,5 @@ nav {
 }
 nav a { color: #333; text-decoration: none; }
 nav a.router-link-active { font-weight: 600; color: #0066cc; }
+nav .sep { flex: 1; }
 </style>
