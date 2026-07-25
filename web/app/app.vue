@@ -3,6 +3,7 @@
     <nav>
       <NuxtLink to="/">Признаки</NuxtLink>
       <NuxtLink to="/run">Запуск расчёта</NuxtLink>
+      <NuxtLink to="/history">История</NuxtLink>
       <span class="sep"></span>
       <NuxtLink to="/docs">О проекте</NuxtLink>
       <NuxtLink to="/docs/methods">Методы</NuxtLink>

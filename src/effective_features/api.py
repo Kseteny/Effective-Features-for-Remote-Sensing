@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 import threading
+from contextlib import asynccontextmanager
 from collections import deque
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -27,13 +28,22 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from . import storage
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube
 from .selectors import (
     forward_selection_bhatta, forward_selection_knn, evaluate_feature_set
 )
 
-app = FastAPI(title="Effective Features API", version="1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Что сделать при запуске сервера и что — при остановке.
+    До yield — запуск, после — остановка."""
+    storage.init_db()          # создаём таблицу истории, если её ещё нет
+    yield
+
+
+app = FastAPI(title="Effective Features API", version="1.1", lifespan=lifespan)
 
 # Разрешаем фронтенду (он крутится на другом порту) обращаться к нам.
 # В продакшене список адресов надо сузить до реального домена.
@@ -340,6 +350,20 @@ def _run_task(task: Task):
         task.set_stage('Готово', 1.0)
         task.status = 'done'
 
+        # Кладём в историю. Если запись не удалась — расчёт всё равно
+        # считается успешным: результат уже посчитан и лежит в памяти,
+        # ронять его из-за проблем с базой было бы обидно.
+        try:
+            storage.save_run(
+                task_id=task.id,
+                created_at=task.created_at.isoformat(),
+                preset=task.req.preset,
+                criteria=task.req.criteria,
+                result=task.result,
+            )
+        except Exception as e:
+            print(f"  Не удалось сохранить в историю: {e}")
+
     except InterruptedError as e:
         task.status = 'failed'
         task.error = str(e)
@@ -387,13 +411,48 @@ def get_run(task_id: str):
 @app.get("/api/runs/{task_id}/result")
 def get_result(task_id: str):
     task = TASKS.get(task_id)
+
+    # Задачи нет в памяти — возможно, сервер перезапускали.
+    # Тогда ищем результат в истории.
     if task is None:
-        raise HTTPException(404, "Задача не найдена")
+        saved = storage.get_run(task_id)
+        if saved is None:
+            raise HTTPException(404, "Задача не найдена")
+        return saved
+
     if task.status == 'failed':
         raise HTTPException(409, f"Задача завершилась с ошибкой: {task.error}")
     if task.status != 'done':
         raise HTTPException(409, f"Результат ещё не готов (статус: {task.status})")
     return task.result
+
+
+# ===========================================================================
+# ИСТОРИЯ РАСЧЁТОВ
+# ===========================================================================
+@app.get("/api/history")
+def get_history(limit: int = 50):
+    """Список прошлых расчётов, свежие сверху."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(422, "limit должен быть от 1 до 200")
+    return {'items': storage.list_runs(limit), 'total': storage.count_runs()}
+
+
+@app.get("/api/history/{task_id}")
+def get_history_item(task_id: str):
+    """Полный результат сохранённого расчёта."""
+    saved = storage.get_run(task_id)
+    if saved is None:
+        raise HTTPException(404, "Запись не найдена")
+    return saved
+
+
+@app.delete("/api/history/{task_id}")
+def delete_history_item(task_id: str):
+    """Удаляет расчёт из истории."""
+    if not storage.delete_run(task_id):
+        raise HTTPException(404, "Запись не найдена")
+    return {'task_id': task_id, 'deleted': True}
 
 
 @app.delete("/api/runs/{task_id}")

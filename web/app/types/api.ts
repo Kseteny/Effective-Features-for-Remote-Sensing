@@ -65,3 +65,19 @@ export interface RunResult {
   } | null
   total_time_sec: number
 }
+
+export interface HistoryItem {
+  task_id: string
+  created_at: string
+  preset: string
+  criteria: string[]
+  n_pixels: number | null
+  n_classes: number | null
+  total_time_sec: number | null
+  accuracies: Record<string, number>
+}
+
+export interface HistoryResponse {
+  items: HistoryItem[]
+  total: number
+}
