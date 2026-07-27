@@ -4,10 +4,17 @@ import { Chart } from 'chart.js/auto'
 const props = defineProps<{
   labels: string[]
   values: number[]
-  title: string
   yLabel: string
   asPercent?: boolean
+  /** Идентификатор критерия — от него зависит цвет линии,
+   *  чтобы график совпадал по цвету с меткой в таблице. */
+  color?: string
 }>()
+
+const PALETTE: Record<string, { line: string; fill: string }> = {
+  knn:           { line: '#9C620F', fill: 'rgba(156, 98, 15, 0.14)' },
+  bhattacharyya: { line: '#14664A', fill: 'rgba(20, 102, 74, 0.14)' },
+}
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
@@ -16,9 +23,8 @@ function draw() {
   if (!canvas.value) return
   chart?.destroy()
 
-  const shown = props.asPercent
-    ? props.values.map(v => v * 100)
-    : props.values
+  const tone = PALETTE[props.color ?? 'bhattacharyya'] ?? PALETTE.bhattacharyya!
+  const shown = props.asPercent ? props.values.map(v => v * 100) : props.values
 
   chart = new Chart(canvas.value, {
     type: 'line',
@@ -27,20 +33,29 @@ function draw() {
       datasets: [{
         label: props.yLabel,
         data: shown,
-        borderColor: '#0066cc',
-        backgroundColor: 'rgba(0, 102, 204, .1)',
-        pointRadius: 4,
+        borderColor: tone.line,
+        backgroundColor: tone.fill,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#fff',
+        pointBorderColor: tone.line,
+        pointBorderWidth: 2,
         fill: true,
-        tension: 0.2,
+        tension: 0.25,
       }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        title: { display: true, text: props.title },
         legend: { display: false },
         tooltip: {
+          backgroundColor: '#17211C',
+          padding: 10,
+          titleFont: { family: 'IBM Plex Mono', size: 12 },
+          bodyFont: { family: 'IBM Plex Mono', size: 12 },
+          displayColors: false,
           callbacks: {
             title: (items) => {
               const first = items[0]
@@ -57,8 +72,17 @@ function draw() {
         },
       },
       scales: {
-        x: { title: { display: true, text: 'Добавленный признак' } },
-        y: { title: { display: true, text: props.yLabel } },
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: 'IBM Plex Mono', size: 10 }, color: '#8A968E' },
+        },
+        y: {
+          border: { display: false },
+          grid: { color: '#E4EBE3' },
+          ticks: { font: { family: 'IBM Plex Mono', size: 10 }, color: '#8A968E' },
+          title: { display: true, text: props.yLabel, color: '#8A968E',
+                   font: { family: 'IBM Plex Sans', size: 11 } },
+        },
       },
     },
   })
@@ -79,5 +103,5 @@ onUnmounted(() => chart?.destroy())
 </template>
 
 <style scoped>
-.chart-box { height: 320px; margin: 1rem 0; }
+.chart-box { height: 300px; }
 </style>

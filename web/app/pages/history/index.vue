@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { HistoryResponse } from '~/types/api'
 
+useHead({ title: 'История' })
+
 const config = useRuntimeConfig()
 const api = config.public.apiBase
 
-const { data, refresh } = await useFetch<HistoryResponse>(`${api}/api/history`)
+const { data, refresh, error } = await useFetch<HistoryResponse>(`${api}/api/history`)
 
 const presetNames: Record<string, string> = {
   fast: 'Быстрый',
@@ -15,9 +17,17 @@ const presetNames: Record<string, string> = {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('ru', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
+    day: '2-digit', month: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
+}
+
+function label(id: string) {
+  return id === 'knn' ? 'kNN' : 'Бхатт.'
+}
+
+function tagClass(id: string) {
+  return id === 'knn' ? 'tag tag--knn' : 'tag tag--bhatta'
 }
 
 async function remove(taskId: string) {
@@ -28,58 +38,63 @@ async function remove(taskId: string) {
 </script>
 
 <template>
-  <div class="wrap">
-    <h1>История расчётов</h1>
+  <div class="page">
+    <div class="page__head">
+      <h1>История</h1>
+      <p class="page__lead">
+        Все законченные расчёты. Сохраняются в базе, поэтому остаются
+        на месте после перезапуска сервера.
+      </p>
+    </div>
 
-    <p v-if="!data || data.total === 0">
-      Пока пусто. Запустите расчёт на странице
-      <NuxtLink to="/run">«Запуск расчёта»</NuxtLink>.
+    <p v-if="error" class="notice notice--error">
+      Сервер расчётов не отвечает. Проверьте, запущен ли он на порту 8000.
     </p>
 
-    <table v-else>
-      <thead>
-        <tr>
-          <th>Когда</th>
-          <th>Режим</th>
-          <th>Пикселей</th>
-          <th>Точность</th>
-          <th>Время</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="it in data.items" :key="it.task_id">
-          <td>
-            <NuxtLink :to="`/history/${it.task_id}`">
-              {{ formatDate(it.created_at) }}
-            </NuxtLink>
-          </td>
-          <td>{{ presetNames[it.preset] ?? it.preset }}</td>
-          <td>{{ it.n_pixels?.toLocaleString('ru') ?? '—' }}</td>
-          <td>
-            <span v-for="(acc, crit) in it.accuracies" :key="crit" class="acc">
-              {{ crit === 'knn' ? 'kNN' : 'Бхатт.' }} {{ (acc * 100).toFixed(1) }}%
-            </span>
-          </td>
-          <td>{{ it.total_time_sec }} с</td>
-          <td>
-            <button class="del" @click="remove(it.task_id)" title="Удалить">×</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else-if="!data || data.total === 0" class="notice notice--empty">
+      Пока пусто. Первый расчёт можно запустить на странице
+      <NuxtLink to="/run">«Расчёт»</NuxtLink>.
+    </div>
+
+    <div v-else class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Когда</th>
+            <th>Режим</th>
+            <th>Пикселей</th>
+            <th>Точность</th>
+            <th>Время</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="it in data.items" :key="it.task_id">
+            <td>
+              <NuxtLink :to="`/history/${it.task_id}`" class="when">
+                {{ formatDate(it.created_at) }}
+              </NuxtLink>
+            </td>
+            <td>{{ presetNames[it.preset] ?? it.preset }}</td>
+            <td class="num">{{ it.n_pixels?.toLocaleString('ru') ?? '—' }}</td>
+            <td class="accs">
+              <span v-for="(acc, crit) in it.accuracies" :key="crit" :class="tagClass(crit)">
+                {{ label(crit) }} {{ (acc * 100).toFixed(1) }}%
+              </span>
+            </td>
+            <td class="num">{{ it.total_time_sec }} с</td>
+            <td>
+              <button class="icon-btn" @click="remove(it.task_id)" :aria-label="'Удалить расчёт'">×</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.wrap { padding: 2rem; max-width: 900px; }
-table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-th, td { border: 1px solid #ddd; padding: .5rem .7rem; text-align: left; }
-th { background: #fafafa; font-weight: 600; }
-.acc { display: inline-block; margin-right: .8rem; white-space: nowrap; }
-.del {
-  border: 0; background: none; cursor: pointer;
-  font-size: 1.2rem; color: #999; line-height: 1;
-}
-.del:hover { color: crimson; }
+.when { font-weight: 500; text-decoration: none; }
+.when:hover { text-decoration: underline; }
+.accs { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 </style>
