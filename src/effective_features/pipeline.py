@@ -140,7 +140,8 @@ def run(cfg: ExperimentConfig = None):
     for cls in unique_cls:
         mv, cm = calculate_class_stats(dataset, mask, int(cls),
                                         max_samples=cfg.bhatta_max_samples,
-                                        seed=cfg.random_seed)
+                                        seed=cfg.random_seed,
+                                        class_names=cfg.class_names())
         if mv is not None:
             stats[int(cls)] = {'mean': mv, 'cov': cm}
     classes_list = sorted(stats.keys())

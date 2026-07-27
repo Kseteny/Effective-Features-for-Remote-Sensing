@@ -14,6 +14,7 @@ api.py — веб-сервис поверх расчётного ядра.
 Документация появится сама на http://localhost:8000/docs — FastAPI генерирует
 её из типов, ничего писать не надо.
 """
+import os
 import sys
 import time
 import uuid
@@ -28,7 +29,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import storage
+from . import storage, dataset
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube
 from .selectors import (
@@ -121,6 +122,11 @@ def build_feature_list(window_sizes=(3, 5, 7, 9), use_spectral=True):
     return items
 
 
+def _project_root() -> str:
+    """Корень проекта: на два уровня выше пакета (src/effective_features/)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 @app.get("/api/features")
 def get_features():
     items = build_feature_list()
@@ -139,13 +145,33 @@ def get_criteria():
 
 @app.get("/api/classes")
 def get_classes():
-    return {'items': [{'id': k, 'name': v} for k, v in sorted(CLASS_NAMES.items())]}
+    # Названия берём из описания датасета; если его нет — встроенные
+    try:
+        names = dataset.load_spec(_project_root()).classes or CLASS_NAMES
+    except dataset.DatasetError:
+        names = CLASS_NAMES
+    return {'items': [{'id': k, 'name': v} for k, v in sorted(names.items())]}
 
 
 @app.get("/api/presets")
 def get_presets():
     return {'items': [{'id': k, 'name': v['name'], 'description': v['description']}
                       for k, v in PRESETS.items()]}
+
+
+@app.get("/api/dataset")
+def get_dataset():
+    """Что за данные сейчас подключены и что на них получится посчитать.
+
+    Описание берётся из dataset.json в корне проекта. Если файла нет
+    или в нём ошибка — отдаём текст ошибки, чтобы страница могла
+    показать его пользователю, а не молча упасть.
+    """
+    try:
+        report = dataset.check(_project_root())
+        return {'ok': True, **report}
+    except dataset.DatasetError as e:
+        return {'ok': False, 'error': str(e)}
 
 
 # ===========================================================================

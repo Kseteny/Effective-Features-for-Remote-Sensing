@@ -64,30 +64,49 @@ def calc_directional_rho(image, mean, var, window_size):
     return rhos
 
 
-def compute_spectral_features(img_10ch):
+def compute_spectral_features(image, spec):
     """
-    9 спектральных признаков:
-      - 6 нормализованных каналов: Norm_Bi = Bi / ΣBj
-      - 3 индекса: NDVI, NDWI, NDBI
+    Спектральные признаки: нормализованные каналы + индексы.
 
-    Сырые каналы и интегральная яркость S — только сырьё, в признаки не идут.
-    Порядок входных каналов: B2 B3 B4 B8 B5 B6 B7 B8A B11 B12 (индексы 0..9).
+    Что именно считается, зависит от описания датасета:
+      - в признаки идут каналы из spec.bands_for_features()
+      - нормировка: Norm_Bi = Bi / сумма выбранных каналов
+      - индексы считаются только те, для которых заданы нужные роли
+
+    Раньше номера каналов и формулы были прописаны прямо здесь, поэтому
+    работал ровно один датасет. Теперь всё берётся из dataset.json.
     """
     eps = 1e-8
-    B2, B3, B4, B8 = img_10ch[0], img_10ch[1], img_10ch[2], img_10ch[3]
-    B11, B12       = img_10ch[8], img_10ch[9]
-
-    base  = np.stack([B2, B3, B4, B8, B11, B12], axis=0)
-    total = np.sum(base, axis=0)                  # S — сырьё
-
     out = {}
-    for i, name in enumerate(['B2', 'B3', 'B4', 'B8', 'B11', 'B12']):
+
+    band_names = spec.bands_for_features()
+    idx = [spec.band_order.index(b) for b in band_names]
+    base = np.stack([image[i] for i in idx], axis=0)
+    total = np.sum(base, axis=0)                  # S — сырьё, в признаки не идёт
+
+    for i, name in enumerate(band_names):
         out[f'Norm_{name}'] = (base[i] / (total + eps)).astype(np.float32)
 
-    out['NDVI'] = ((B8  - B4)  / (B8  + B4  + eps)).astype(np.float32)
-    out['NDWI'] = ((B3  - B8)  / (B3  + B8  + eps)).astype(np.float32)
-    out['NDBI'] = ((B11 - B8)  / (B11 + B8  + eps)).astype(np.float32)
-    return out  # 9 признаков
+    def band(role):
+        """Канал по роли. None, если роль не задана в описании."""
+        i = spec.band_index(role)
+        return None if i is None else image[i]
+
+    def ratio(a, b):
+        """Нормализованная разность (a − b) / (a + b) — общая форма
+        для NDVI, NDWI и NDBI."""
+        return ((a - b) / (a + b + eps)).astype(np.float32)
+
+    nir, red, green, swir1 = band('nir'), band('red'), band('green'), band('swir1')
+
+    if nir is not None and red is not None:
+        out['NDVI'] = ratio(nir, red)
+    if green is not None and nir is not None:
+        out['NDWI'] = ratio(green, nir)
+    if swir1 is not None and nir is not None:
+        out['NDBI'] = ratio(swir1, nir)
+
+    return out
 
 
 def extract_all_features(image, cfg: ExperimentConfig):
@@ -100,9 +119,16 @@ def extract_all_features(image, cfg: ExperimentConfig):
     fs = {}
 
     if cfg.use_spectral and image.ndim == 3:
-        print("    Спектральные признаки (6 нормализованных + NDVI/NDWI/NDBI)...")
-        fs.update(compute_spectral_features(image))
-        gray = np.mean(np.stack([image[i] for i in [0, 1, 2, 3, 8, 9]], axis=0),
+        spec = cfg.spec
+        band_names = spec.bands_for_features()
+        n_idx = len(spec.available_indices())
+        print(f"    Спектральные признаки ({len(band_names)} нормализованных"
+              f"{f' + {n_idx} индекса' if n_idx else ''})...")
+        fs.update(compute_spectral_features(image, spec))
+
+        # Яркость для текстуры — среднее по тем же каналам, что идут в признаки
+        idx = [spec.band_order.index(b) for b in band_names]
+        gray = np.mean(np.stack([image[i] for i in idx], axis=0),
                        axis=0).astype(np.float32)
     else:
         gray = (np.mean(image, axis=0) if image.ndim == 3 else image).astype(np.float32)
@@ -141,34 +167,26 @@ def parse_feature_window(name):
 # ЗАГРУЗКА ДАННЫХ (MultiSenGE)
 # ===========================================================================
 
-def load_pair(s2_name, gr_name, data_dir):
-    """Загружает (10,H,W) float32 снимок и (H,W) uint8 маску."""
-    with rasterio.open(os.path.join(data_dir, 's2_pref', s2_name.strip())) as s:
+def load_pair(img_name, mask_name, spec):
+    """Загружает снимок (C,H,W) float32 и маску (H,W) uint8.
+    Пути берутся из описания датасета."""
+    with rasterio.open(os.path.join(spec.images_path, img_name.strip())) as s:
         image = s.read().astype(np.float32)
-    with rasterio.open(os.path.join(data_dir, 'ground_reference', gr_name.strip())) as s:
+    with rasterio.open(os.path.join(spec.masks_path, mask_name.strip())) as s:
         mask = s.read(1).astype(np.uint8)
     return image, mask
 
 
-def get_file_lists(lists_dir):
-    """Читает out_s2_pref.txt / out_gr_pref.txt."""
-    with open(os.path.join(lists_dir, 'out_s2_pref.txt')) as f:
-        s2 = [l.strip() for l in f if l.strip()]
-    with open(os.path.join(lists_dir, 'out_gr_pref.txt')) as f:
-        gr = [l.strip() for l in f if l.strip()]
-    return s2, gr
-
-
-def _read_mask_classes(gr_name, data_dir):
+def _read_mask_classes(mask_name, spec):
     """Быстро читает только маску патча и возвращает множество классов
     в ней (без нулей = фон). Используется только для прореживания —
     признаки при этом НЕ считаются, так что это дёшево."""
-    with rasterio.open(os.path.join(data_dir, 'ground_reference', gr_name.strip())) as f:
+    with rasterio.open(os.path.join(spec.masks_path, mask_name.strip())) as f:
         mask = f.read(1)
     return set(np.unique(mask).tolist()) - {0}
 
 
-def select_pairs_thinned(pairs, cfg: ExperimentConfig, data_dir):
+def select_pairs_thinned(pairs, cfg: ExperimentConfig, spec):
     """
     Систематическое прореживание (предложено В.В. Сергеевым): вместо
     случайной выборки патчей берём каждый k-й патч ПО ПОРЯДКУ — это даёт
@@ -192,25 +210,25 @@ def select_pairs_thinned(pairs, cfg: ExperimentConfig, data_dir):
     print("  Проверка покрытия классов (сканирую маски, без признаков)...")
 
     covered = set()
-    for s2, gr in thinned:
-        covered |= _read_mask_classes(gr, data_dir)
+    for img, msk in thinned:
+        covered |= _read_mask_classes(msk, spec)
 
-    all_classes = set(CLASS_NAMES.keys())
+    all_classes = set(cfg.class_names().keys())
     missing = all_classes - covered
     if missing:
         print(f"  Не хватает классов: {sorted(missing)} — ищу патчи, где они есть...")
-        for s2, gr in pairs:
+        for img, msk in pairs:
             if not missing:
                 break
-            if (s2, gr) in thinned_set:
+            if (img, msk) in thinned_set:
                 continue
-            classes_here = _read_mask_classes(gr, data_dir)
+            classes_here = _read_mask_classes(msk, spec)
             found = classes_here & missing
             if found:
-                thinned.append((s2, gr))
-                thinned_set.add((s2, gr))
+                thinned.append((img, msk))
+                thinned_set.add((img, msk))
                 missing -= found
-                print(f"    + добавлен {s2} (закрывает классы {sorted(found)})")
+                print(f"    + добавлен {img} (закрывает классы {sorted(found)})")
         if missing:
             print(f"  ВНИМАНИЕ: классы {sorted(missing)} не найдены ни в одном патче датасета.")
 
@@ -219,21 +237,22 @@ def select_pairs_thinned(pairs, cfg: ExperimentConfig, data_dir):
     return thinned
 
 
-def select_pairs(cfg: ExperimentConfig, lists_dir, data_dir=None):
+def select_pairs(cfg: ExperimentConfig):
     """
     cfg.use_thinning=True → систематическое прореживание с гарантией всех
     классов (см. select_pairs_thinned);
     cfg.n_patches=None    → весь датасет;
     иначе                 → случайные n_patches патчей.
-    """
-    s2_list, gr_list = get_file_lists(lists_dir)
-    if len(s2_list) != len(gr_list):
-        raise ValueError("Количество снимков и масок не совпадает")
 
-    pairs = list(zip(s2_list, gr_list))
+    Сами пары снимок-маска берутся из описания датасета: либо по спискам
+    файлов, либо сопоставлением по именам.
+    """
+    from .dataset import find_pairs
+    spec = cfg.spec
+    pairs = find_pairs(spec)
 
     if cfg.use_thinning:
-        return select_pairs_thinned(pairs, cfg, data_dir)
+        return select_pairs_thinned(pairs, cfg, spec)
 
     if cfg.n_patches is None:
         print(f"\n  Используется ВЕСЬ датасет: {len(pairs)} патчей")
@@ -279,13 +298,13 @@ def normalize_channels(raw_img):
     return np.moveaxis(img, -1, 0)
 
 
-def _patch_cache_path(cfg, s2_name):
+def _patch_cache_path(cfg, img_name):
     """
     Путь к кеш-файлу признаков патча.
     Имя кодирует и патч, и конфигурацию признаков (окна/спектральность),
     чтобы при смене параметров не подхватился несовместимый кеш.
     """
-    base = os.path.splitext(os.path.basename(s2_name.strip()))[0]
+    base = os.path.splitext(os.path.basename(img_name.strip()))[0]
     return os.path.join(cfg.cache_dir, f"{base}__{cfg.cache_key()}.npz")
 
 
@@ -302,14 +321,14 @@ def _compute_patch_features(raw_img, cfg):
     return make_feature_sandwich(feat_dict)   # (cube, names)
 
 
-def get_patch_features(cfg, s2_name, raw_img):
+def get_patch_features(cfg, img_name, raw_img):
     """
     Возвращает (cube, names) признаков патча, используя кеш по правилам:
       force_recompute=True → считаем заново, обновляем кеш (если save_cache);
       use_cache=True       → пробуем прочитать из кеша, иначе считаем;
       иначе                → считаем на лету.
     """
-    cache_path = _patch_cache_path(cfg, s2_name)
+    cache_path = _patch_cache_path(cfg, img_name)
 
     # 1) Чтение из кеша (если разрешено и не форсим пересчёт)
     if cfg.use_cache and not cfg.force_recompute and os.path.isfile(cache_path):
@@ -338,21 +357,16 @@ def get_patch_features(cfg, s2_name, raw_img):
 def load_all_data(cfg: ExperimentConfig):
     """
     Полный цикл загрузки: патчи → признаки → объединённая выборка (X, y, names).
-    Читает РЕАЛЬНЫЙ датасет MultiSenGE из data/ и lists/.
+    Какие данные читать и как их разбирать — берётся из dataset.json.
     Признаки патчей кешируются (см. cfg.use_cache / save_cache / force_recompute).
     """
     if not HAS_RASTERIO:
         raise RuntimeError("rasterio не установлен. pip install rasterio")
 
-    data_dir  = os.path.join(cfg.project_root, 'data')
-    lists_dir = os.path.join(cfg.project_root, 'lists')
+    spec = cfg.spec
+    print(f"  Датасет: {spec.name}")
 
-    has_lists = (os.path.isfile(os.path.join(lists_dir, 'out_s2_pref.txt')) and
-                 os.path.isfile(os.path.join(lists_dir, 'out_gr_pref.txt')))
-    if not has_lists:
-        raise RuntimeError("Не найдены lists/out_s2_pref.txt и out_gr_pref.txt")
-
-    pairs = select_pairs(cfg, lists_dir, data_dir)
+    pairs = select_pairs(cfg)
 
     cache_mode = ('пересчёт+кеш' if cfg.force_recompute else
                   'кеш' if cfg.use_cache else 'без кеша')
@@ -362,17 +376,17 @@ def load_all_data(cfg: ExperimentConfig):
     names = None
     X_parts, y_parts = [], []   # копим куски, склеиваем один раз в конце
     total_pixels = 0
-    for idx, (s2_name, gr_name) in enumerate(pairs, 1):
-        print(f"\n  Патч {idx}/{len(pairs)}: {s2_name}")
+    for idx, (img_name, mask_name) in enumerate(pairs, 1):
+        print(f"\n  Патч {idx}/{len(pairs)}: {img_name}")
         try:
-            cache_path = _patch_cache_path(cfg, s2_name)
+            cache_path = _patch_cache_path(cfg, img_name)
             cached = (cfg.use_cache and not cfg.force_recompute
                       and os.path.isfile(cache_path))
 
             # Маску надо прочитать всегда (она не кешируется — лёгкая)
-            raw_img, patch_mask = load_pair(s2_name, gr_name, data_dir)
+            raw_img, patch_mask = load_pair(img_name, mask_name, spec)
 
-            cube, patch_names = get_patch_features(cfg, s2_name, raw_img)
+            cube, patch_names = get_patch_features(cfg, img_name, raw_img)
             if cached:
                 n_from_cache += 1
             else:
@@ -395,7 +409,7 @@ def load_all_data(cfg: ExperimentConfig):
             print(f"  +{len(X_patch):,} пкс | итого: {total_pixels:,}")
 
         except Exception as e:
-            print(f"  Ошибка патча {s2_name}: {e}")
+            print(f"  Ошибка патча {img_name}: {e}")
 
     print(f"\n  Признаки: из кеша {n_from_cache}, посчитано {n_computed}")
 

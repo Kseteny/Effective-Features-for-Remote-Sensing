@@ -42,7 +42,8 @@ def _cap_class_samples(X, max_samples, seed):
     return X[idx]
 
 
-def calculate_class_stats(dataset, mask, class_id, max_samples=None, seed=42):
+def calculate_class_stats(dataset, mask, class_id, max_samples=None, seed=42,
+                          class_names=None):
     """Вектор средних + ковариационная матрица для пикселей класса.
 
     max_samples ограничивает объём данных для np.cov (см. _cap_class_samples) —
@@ -57,7 +58,8 @@ def calculate_class_stats(dataset, mask, class_id, max_samples=None, seed=42):
     n_full = len(X)
     X = _cap_class_samples(X, max_samples, seed)
     suffix = f" (подвыборка из {n_full:,})" if len(X) < n_full else ""
-    print(f"   Класс {class_id} ({CLASS_NAMES.get(class_id, '?')}): {len(X):,} пкс{suffix}")
+    names = class_names if class_names is not None else CLASS_NAMES
+    print(f"   Класс {class_id} ({names.get(class_id, '?')}): {len(X):,} пкс{suffix}")
     cov = np.cov(X, rowvar=False)
     if cov.ndim == 0:
         cov = np.array([[float(cov)]])

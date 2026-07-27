@@ -6,6 +6,7 @@ EFFECTIVE-FEATURES: инструмент сравнительного анали
 """
 
 import os
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -104,6 +105,11 @@ class ExperimentConfig:
     #   и кеш ОБНОВЛЯЕТСЯ (если save_cache=True). Нужно при смене формул.
     cache_dir: Optional[str] = None   # папка кеша (по умолч. <root>/cache)
 
+    # --- Описание датасета ---
+    dataset_json: Optional[str] = None
+    # Путь к dataset.json. None → ищем в корне проекта. Оттуда берутся
+    # папки с данными, порядок каналов, их роли и названия классов.
+
     # --- Пути (если None — определяются автоматически) ---
     project_root: Optional[str] = None
     output_dir: Optional[str] = None
@@ -152,18 +158,57 @@ class ExperimentConfig:
             self.cache_dir = os.path.join(self.project_root, 'cache')
         if self.use_cache or self.save_cache:
             _ensure_dir(self.cache_dir)
+
+        # Описание датасета — грузим один раз и держим при конфиге
+        if self.dataset_json is None:
+            self.dataset_json = os.path.join(self.project_root, 'dataset.json')
+        self._spec = None
         return self
+
+    @property
+    def spec(self):
+        """Описание датасета. Читается при первом обращении."""
+        if getattr(self, '_spec', None) is None:
+            from .dataset import load_spec
+            self._spec = load_spec(self.dataset_json)
+        return self._spec
+
+    def class_names(self):
+        """Названия классов: из описания датасета, иначе встроенные."""
+        try:
+            names = self.spec.classes
+            if names:
+                return names
+        except Exception:
+            pass
+        return CLASS_NAMES
 
     def cache_key(self):
         """
         Идентификатор конфигурации признаков для имени кеш-файла.
-        Кеш валиден только при тех же параметрах признакового пространства
-        (окна + спектральность). При их изменении ключ другой — старый кеш
-        не подхватится, т.к. признаки были бы иными.
+
+        Кеш валиден только при тех же параметрах признакового пространства:
+        окна, флаг спектральности и набор каналов из описания датасета.
+        Каналы важны: у другого датасета файл может называться так же,
+        но состоять из других каналов — и тогда подхватился бы чужой кеш,
+        а признаки молча оказались бы не от тех данных.
         """
         windows = '-'.join(str(w) for w in self.window_sizes)
-        spec = 'spec' if self.use_spectral else 'nospec'
-        return f"w{windows}_{spec}"
+        mode = 'spec' if self.use_spectral else 'nospec'
+        key = f"w{windows}_{mode}"
+
+        if self.use_spectral:
+            try:
+                bands = self.spec.bands_for_features()
+                indices = self.spec.available_indices()
+                fingerprint = ','.join(bands) + '|' + ','.join(indices)
+                short = hashlib.md5(fingerprint.encode()).hexdigest()[:6]
+                key += f"_{short}"
+            except Exception:
+                # Описание не прочиталось — ключ без отпечатка.
+                # Хуже, чем с ним, но лучше, чем падение на ровном месте.
+                pass
+        return key
 
 
 # ===========================================================================
