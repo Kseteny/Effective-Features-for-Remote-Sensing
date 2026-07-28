@@ -223,6 +223,22 @@ a { color: var(--forest); }
 .btn:hover:not(:disabled) { background: #17563F; }
 .btn:disabled { background: var(--line-strong); cursor: not-allowed; }
 
+/* Второстепенное действие: отмена не должна выглядеть так же
+   заметно, как запуск, но и прятать её нельзя. */
+.btn--ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-strong);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--danger-tint);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn--ghost:disabled { background: transparent; color: var(--ink-faint); }
+
 /* --------------------------------------------------------------------------
    ТАБЛИЦЫ
    -------------------------------------------------------------------------- */

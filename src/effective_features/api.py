@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from . import storage, dataset, criteria as crit
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube
-from .selectors import evaluate_feature_set
+from .selectors import evaluate_feature_set, Cancelled
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -285,7 +285,7 @@ def _run_task(task: Task):
 
     def check_cancelled():
         if task.cancelled:
-            raise InterruptedError("Задача отменена")
+            raise Cancelled()
 
     try:
         cfg = _build_config(task.req)
@@ -314,7 +314,11 @@ def _run_task(task: Task):
 
             t0 = time.perf_counter()
             selected, history = criterion.select(
-                dataset, mask, cfg, target_classes=target_classes)
+                dataset, mask, cfg,
+                target_classes=target_classes,
+                # Признак отмены проверяется внутри циклов отбора,
+                # поэтому остановка происходит почти сразу
+                should_stop=lambda: task.cancelled)
             dt = time.perf_counter() - t0
 
             ev = evaluate_feature_set(dataset, mask, selected, cfg,
@@ -380,9 +384,10 @@ def _run_task(task: Task):
         except Exception as e:
             print(f"  Не удалось сохранить в историю: {e}")
 
-    except InterruptedError as e:
-        task.status = 'failed'
-        task.error = str(e)
+    except Cancelled:
+        task.status = 'cancelled'
+        task.stage = 'Остановлено'
+        task.error = None
     except Exception as e:
         task.status = 'failed'
         task.error = f"{type(e).__name__}: {e}"
@@ -471,6 +476,19 @@ def delete_history_item(task_id: str):
     if not storage.delete_run(task_id):
         raise HTTPException(404, "Запись не найдена")
     return {'task_id': task_id, 'deleted': True}
+
+
+@app.post("/api/runs/{task_id}/cancel")
+def cancel_run(task_id: str):
+    """Останавливает расчёт, но оставляет задачу — чтобы страница
+    могла показать, что он был отменён, а не просто исчез."""
+    task = TASKS.get(task_id)
+    if task is None:
+        raise HTTPException(404, "Задача не найдена")
+    if task.status in ('done', 'failed', 'cancelled'):
+        raise HTTPException(409, f"Расчёт уже завершён (статус: {task.status})")
+    task.cancelled = True
+    return {'task_id': task_id, 'cancelling': True}
 
 
 @app.delete("/api/runs/{task_id}")

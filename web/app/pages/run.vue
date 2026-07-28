@@ -21,6 +21,24 @@ const busy = computed(() =>
   status.value?.status === 'queued' || status.value?.status === 'running'
 )
 
+const cancelled = computed(() => status.value?.status === 'cancelled')
+
+// Отдельный признак: запрос на отмену уже отправлен, но расчёт
+// ещё не остановился. Нужен, чтобы кнопка не позволяла нажать дважды.
+const cancelling = ref(false)
+
+async function cancel() {
+  const id = status.value?.task_id
+  if (!id) return
+  cancelling.value = true
+  try {
+    await $fetch(`${api}/api/runs/${id}/cancel`, { method: 'POST' })
+  } catch {
+    // Расчёт мог успеть закончиться сам — тогда отменять уже нечего
+    cancelling.value = false
+  }
+}
+
 // Имя и цвет критерия приходят с сервера вместе с результатом,
 // поэтому новый критерий появляется в интерфейсе сам, без правок здесь.
 function label(c: { id: string; name?: string }) {
@@ -52,6 +70,7 @@ async function start() {
   errorText.value = ''
   result.value = null
   status.value = null
+  cancelling.value = false
 
   try {
     const started = await $fetch<{ task_id: string }>(`${api}/api/runs`, {
@@ -74,8 +93,12 @@ function poll(taskId: string) {
       if (s.status === 'done') {
         stopTimer()
         result.value = await $fetch<RunResult>(`${api}/api/runs/${taskId}/result`)
+      } else if (s.status === 'cancelled') {
+        stopTimer()
+        cancelling.value = false
       } else if (s.status === 'failed') {
         stopTimer()
+        cancelling.value = false
         errorText.value = s.error ?? 'Расчёт прервался'
       }
     } catch {
@@ -127,6 +150,15 @@ onUnmounted(stopTimer)
           {{ busy ? 'Считаю…' : 'Запустить' }}
         </button>
 
+        <button
+          v-if="busy"
+          class="btn btn--ghost run__cancel"
+          :disabled="cancelling"
+          @click="cancel"
+        >
+          {{ cancelling ? 'Останавливаю…' : 'Отменить' }}
+        </button>
+
         <p v-if="chosen.length === 0" class="mono-sm run__hint">
           Выберите хотя бы один критерий
         </p>
@@ -142,6 +174,11 @@ onUnmounted(stopTimer)
             <div class="progress__fill" :style="{ width: (status.progress * 100) + '%' }"></div>
           </div>
           <pre class="log">{{ status.log_tail.join('\n') }}</pre>
+        </div>
+
+        <div v-if="cancelled" class="notice notice--empty">
+          Расчёт остановлен. Результатов нет — можно поменять параметры
+          и запустить заново.
         </div>
 
         <div v-if="!status && !result && !errorText" class="notice notice--empty">
@@ -221,6 +258,7 @@ onUnmounted(stopTimer)
 .run__controls { position: sticky; top: 5.5rem; }
 .run__controls .card + .card { margin-top: 1rem; }
 .run__go { margin-top: 1rem; }
+.run__cancel { margin-top: 0.5rem; }
 .run__hint { text-align: center; margin: 0.5rem 0 0; }
 .run__meta { margin: 0 0 1rem; font-size: 0.9rem; }
 .run__agree { margin: 1.25rem 0 0; font-size: 0.9rem; }

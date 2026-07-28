@@ -24,6 +24,25 @@ from .config import ExperimentConfig, CLASS_NAMES
 
 
 # ===========================================================================
+# ОСТАНОВКА РАСЧЁТА
+# ===========================================================================
+class Cancelled(Exception):
+    """Расчёт остановлен пользователем."""
+
+
+def _check_stop(should_stop):
+    """Прерывает расчёт, если пользователь нажал отмену.
+
+    Вызывается внутри циклов перебора признаков, а не только между
+    этапами: один шаг отбора по kNN перебирает все признаки-кандидаты
+    и может идти минуту, и всё это время кнопка отмены казалась бы
+    неработающей.
+    """
+    if should_stop is not None and should_stop():
+        raise Cancelled()
+
+
+# ===========================================================================
 # СТАТИСТИКА КЛАССОВ И ПОПАРНЫЕ РАССТОЯНИЯ
 # ===========================================================================
 def _cap_class_samples(X, max_samples, seed):
@@ -142,7 +161,8 @@ def _class_stats_full(dataset, mask, classes, cfg):
     return stats
 
 
-def forward_selection_maha(dataset, mask, cfg: ExperimentConfig, target_classes=None):
+def forward_selection_maha(dataset, mask, cfg: ExperimentConfig,
+                           target_classes=None, should_stop=None):
     """
     Жадный Forward Selection по расстоянию Махаланобиса.
 
@@ -202,6 +222,7 @@ def forward_selection_maha(dataset, mask, cfg: ExperimentConfig, target_classes=
         for i in range(c):
             if i in selected:
                 continue
+            _check_stop(should_stop)
             gain = mean_distance(selected + [i]) - cur
             if gain > best_gain:
                 best_gain, best_f = gain, i
@@ -243,7 +264,8 @@ def _bhatta_samples(X1, X2):
         return 0.0
 
 
-def forward_selection_bhatta(dataset, mask, cfg: ExperimentConfig):
+def forward_selection_bhatta(dataset, mask, cfg: ExperimentConfig,
+                             should_stop=None):
     """
     Жадный Forward Selection по критерию расстояния Бхаттачарьи (filter).
     Параметры из cfg: bhatta_pair, eps, max_features, bhatta_max_samples.
@@ -277,6 +299,7 @@ def forward_selection_bhatta(dataset, mask, cfg: ExperimentConfig):
         for i in range(c):
             if i in selected:
                 continue
+            _check_stop(should_stop)
             gain = _bhatta_samples(X1[:, selected + [i]], X2[:, selected + [i]]) - cur
             if gain > best_g:
                 best_g, best_f = gain, i
@@ -343,7 +366,8 @@ def stratified_subsample(X, y, max_samples, seed, min_per_class=50):
     return X[idx_all], y[idx_all]
 
 
-def forward_selection_knn(dataset, mask, cfg: ExperimentConfig, target_classes=None):
+def forward_selection_knn(dataset, mask, cfg: ExperimentConfig,
+                          target_classes=None, should_stop=None):
     """
     Forward Selection по точности kNN (k=cfg.knn_k, cfg.knn_cv-fold CV).
     StandardScaler применяется перед kNN.
@@ -392,6 +416,7 @@ def forward_selection_knn(dataset, mask, cfg: ExperimentConfig, target_classes=N
         for i in range(c):
             if i in selected:
                 continue
+            _check_stop(should_stop)
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')   # глушим шум от мелких классов
                 acc = cross_val_score(

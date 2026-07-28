@@ -33,7 +33,7 @@ export interface Criterion {
 
 export interface RunStatus {
   task_id: string
-  status: 'queued' | 'running' | 'done' | 'failed'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   stage: string
   progress: number
   log_tail: string[]

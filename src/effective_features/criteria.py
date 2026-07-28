@@ -32,7 +32,8 @@ class Criterion:
     scope: str         # pair — одна пара классов; all — все классы
     unit: str          # что означает величина в истории отбора
     description: str
-    select: Callable   # (dataset, mask, cfg, target_classes) → (indices, history)
+    select: Callable   # (dataset, mask, cfg, target_classes, should_stop)
+                       #   → (indices, history)
     color: str         # цвет в интерфейсе
 
     @property
@@ -45,17 +46,21 @@ class Criterion:
         return self.type == 'filter'
 
 
-def _bhatta(dataset, mask, cfg, target_classes=None):
+def _bhatta(dataset, mask, cfg, target_classes=None, should_stop=None):
     # Бхаттачарья работает по паре классов из настроек, весь набор ей не нужен
-    return forward_selection_bhatta(dataset, mask, cfg)
+    return forward_selection_bhatta(dataset, mask, cfg, should_stop=should_stop)
 
 
-def _maha(dataset, mask, cfg, target_classes=None):
-    return forward_selection_maha(dataset, mask, cfg, target_classes=target_classes)
+def _maha(dataset, mask, cfg, target_classes=None, should_stop=None):
+    return forward_selection_maha(dataset, mask, cfg,
+                                  target_classes=target_classes,
+                                  should_stop=should_stop)
 
 
-def _knn(dataset, mask, cfg, target_classes=None):
-    return forward_selection_knn(dataset, mask, cfg, target_classes=target_classes)
+def _knn(dataset, mask, cfg, target_classes=None, should_stop=None):
+    return forward_selection_knn(dataset, mask, cfg,
+                                 target_classes=target_classes,
+                                 should_stop=should_stop)
 
 
 REGISTRY: Dict[str, Criterion] = {
