@@ -29,12 +29,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import storage, dataset
+from . import storage, dataset, criteria as crit
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube
-from .selectors import (
-    forward_selection_bhatta, forward_selection_knn, evaluate_feature_set
-)
+from .selectors import evaluate_feature_set
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,7 +42,9 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Effective Features API", version="1.1", lifespan=lifespan)
+REGISTRY_IDS = tuple(crit.REGISTRY.keys())
+
+app = FastAPI(title="Effective Features API", version="1.2", lifespan=lifespan)
 
 # Разрешаем фронтенду (он крутится на другом порту) обращаться к нам.
 # В продакшене список адресов надо сузить до реального домена.
@@ -93,18 +93,6 @@ PRESETS = {
                  'cfg': lambda: ExperimentConfig()},
 }
 
-CRITERIA = {
-    'bhattacharyya': {
-        'name': 'Расстояние Бхаттачарьи', 'type': 'filter', 'speed': 'fast', 'pairwise': True,
-        'description': 'Оценивает разделимость пары классов. Не привязан к классификатору, работает за секунды.',
-    },
-    'knn': {
-        'name': 'kNN forward selection', 'type': 'wrapper', 'speed': 'slow', 'pairwise': False,
-        'description': 'Оценивает все классы сразу через точность классификатора. Точнее, но заметно медленнее.',
-    },
-}
-
-
 def build_feature_list(window_sizes=(3, 5, 7, 9), use_spectral=True):
     """Собирает список признаков ровно в том же порядке, в каком их
     нумерует расчётное ядро — иначе индексы в результатах разъедутся."""
@@ -140,7 +128,7 @@ def get_features():
 
 @app.get("/api/criteria")
 def get_criteria():
-    return {'items': [{'id': k, **v} for k, v in CRITERIA.items()]}
+    return {'items': [crit.describe(c) for c in crit.all_criteria()]}
 
 
 @app.get("/api/classes")
@@ -179,7 +167,7 @@ def get_dataset():
 # ===========================================================================
 class RunRequest(BaseModel):
     preset: str = Field(..., description="fast | research | thinned | full")
-    criteria: List[str] = Field(default=['bhattacharyya', 'knn'])
+    criteria: List[str] = Field(default_factory=lambda: list(crit.DEFAULT_SELECTION))
     max_features: Optional[int] = Field(default=None, ge=1, le=41)
     bhatta_pair: Optional[List[int]] = Field(default=None, min_length=2, max_length=2)
     window_sizes: Optional[List[int]] = None
@@ -317,17 +305,16 @@ def _run_task(task: Task):
         n_crit = max(len(task.req.criteria), 1)
         for i, crit_id in enumerate(task.req.criteria):
             check_cancelled()
+            criterion = crit.get(crit_id)
+            if criterion is None:
+                continue
+
             base = 0.15 + 0.8 * i / n_crit
-            task.set_stage(f'Отбор: {CRITERIA.get(crit_id, {}).get("name", crit_id)}', base)
+            task.set_stage(f'Отбор: {criterion.name}', base)
 
             t0 = time.perf_counter()
-            if crit_id == 'bhattacharyya':
-                selected, history = forward_selection_bhatta(dataset, mask, cfg)
-            elif crit_id == 'knn':
-                selected, history = forward_selection_knn(
-                    dataset, mask, cfg, target_classes=target_classes)
-            else:
-                continue
+            selected, history = criterion.select(
+                dataset, mask, cfg, target_classes=target_classes)
             dt = time.perf_counter() - t0
 
             ev = evaluate_feature_set(dataset, mask, selected, cfg,
@@ -335,6 +322,9 @@ def _run_task(task: Task):
             acc = float(ev.get('accuracy', 0))
             results.append({
                 'id': crit_id,
+                'name': criterion.name,
+                'unit': criterion.unit,
+                'color': criterion.color,
                 'selected': [int(s) for s in selected],
                 'selected_names': [names[s] for s in selected],
                 'history': [float(h) for h in history],
@@ -404,9 +394,11 @@ def _run_task(task: Task):
 def create_run(req: RunRequest):
     if req.preset not in PRESETS:
         raise HTTPException(422, f"Неизвестный пресет: {req.preset}")
-    unknown = [c for c in req.criteria if c not in CRITERIA]
+    unknown = crit.unknown(req.criteria)
     if unknown:
-        raise HTTPException(422, f"Неизвестные критерии: {', '.join(unknown)}")
+        known = ', '.join(REGISTRY_IDS)
+        raise HTTPException(
+            422, f"Неизвестные критерии: {', '.join(unknown)}. Доступны: {known}")
 
     task_id = uuid.uuid4().hex[:8]
     task = Task(task_id, req)

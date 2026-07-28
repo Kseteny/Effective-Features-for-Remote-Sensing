@@ -2,16 +2,43 @@
 /**
  * Сетка признаков.
  *
- * Показывает все 41 признак в той структуре, в которой они и считаются:
- * сначала спектральные, затем четыре блока по размерам окна. Отобранные
- * подсвечены цветом своего критерия, а те, что выбрали оба, — половинками
- * обоих цветов. Так видно и состав каждого набора, и их пересечение —
- * то есть ровно то, ради чего критерии и сравниваются.
+ * Показывает все признаки в той структуре, в которой они и считаются:
+ * сначала спектральные, затем блоки по размерам окна. Отобранные
+ * подсвечены цветом своего критерия.
+ *
+ * Признак, выбранный несколькими критериями сразу, делится на полосы —
+ * по одной на каждый критерий. Раньше это работало только для двух
+ * (половинки), теперь для любого количества: цвет делится на равные
+ * доли с резкой границей, без плавного перехода.
  */
+interface CriterionResult {
+  id: string
+  name?: string
+  color?: string
+  selected_names: string[]
+}
+
 const props = defineProps<{
   allFeatures: string[]
-  criteria: { id: string; selected_names: string[] }[]
+  criteria: CriterionResult[]
 }>()
+
+const FALLBACK_COLORS = ['forest', 'gold', 'plum']
+
+// Запасные значения цветов.
+// Без них любая опечатка в названии токена или незамеченная правка стилей
+// делает ячейку белым текстом на прозрачном фоне — то есть невидимой,
+// причём молча, без ошибок в консоли. С запасным значением цвет
+// отработает в любом случае.
+const HEX: Record<string, string> = {
+  forest: '#14664A',
+  gold: '#9C620F',
+  plum: '#6B3A7A',
+}
+
+function paint(tone: string): string {
+  return `var(--${tone}, ${HEX[tone] ?? '#5A6B62'})`
+}
 
 const GROUPS = [
   { key: 'spectral', label: 'Спектральные' },
@@ -29,14 +56,22 @@ function groupOf(name: string): string {
   return parts[parts.length - 1] ?? 'spectral'
 }
 
+/** Цвет критерия: из ответа сервера, иначе по порядку из запаса. */
+function colorOf(c: CriterionResult, i: number): string {
+  return c.color ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]!
+}
+
+const withColors = computed(() =>
+  props.criteria.map((c, i) => ({ ...c, tone: colorOf(c, i) }))
+)
+
 /** Для каждого признака — какие критерии его выбрали. */
 const picks = computed(() => {
-  const map = new Map<string, string[]>()
+  const map = new Map<string, { id: string; name: string; tone: string }[]>()
   for (const name of props.allFeatures) map.set(name, [])
-  for (const c of props.criteria) {
+  for (const c of withColors.value) {
     for (const name of c.selected_names) {
-      const list = map.get(name)
-      if (list) list.push(c.id)
+      map.get(name)?.push({ id: c.id, name: c.name ?? c.id, tone: c.tone })
     }
   }
   return map
@@ -49,21 +84,39 @@ const grouped = computed(() =>
   })).filter(g => g.features.length > 0)
 )
 
-function cellClass(name: string) {
+/** Заливка ячейки: сплошная для одного критерия, полосы для нескольких. */
+function cellStyle(name: string) {
   const by = picks.value.get(name) ?? []
-  if (by.length === 0) return 'cell'
-  if (by.length > 1) return 'cell cell--both'
-  return by[0] === 'knn' ? 'cell cell--knn' : 'cell cell--bhatta'
+  if (by.length === 0) return {}
+  if (by.length === 1) {
+    return { background: paint(by[0]!.tone), color: '#fff', fontWeight: '500' }
+  }
+  const step = 100 / by.length
+  const stops = by
+    .map((c, i) => `${paint(c.tone)} ${i * step}% ${(i + 1) * step}%`)
+    .join(', ')
+  return {
+    background: `linear-gradient(105deg, ${stops})`,
+    color: '#fff',
+    fontWeight: '500',
+  }
 }
 
 function cellTitle(name: string) {
   const by = picks.value.get(name) ?? []
   if (by.length === 0) return `${name} — не отобран`
-  const names = by.map(id => (id === 'knn' ? 'kNN' : 'Бхаттачарья'))
-  return `${name} — ${names.join(' и ')}`
+  return `${name} — ${by.map(c => c.name).join(', ')}`
 }
 
-const hasTwo = computed(() => props.criteria.length > 1)
+/** Сколько признаков выбрали все критерии сразу. */
+const commonCount = computed(() => {
+  if (withColors.value.length < 2) return null
+  let n = 0
+  for (const by of picks.value.values()) {
+    if (by.length === withColors.value.length) n++
+  }
+  return n
+})
 </script>
 
 <template>
@@ -75,7 +128,8 @@ const hasTwo = computed(() => props.criteria.length > 1)
           <div
             v-for="f in g.features"
             :key="f"
-            :class="cellClass(f)"
+            class="cell"
+            :style="cellStyle(f)"
             :title="cellTitle(f)"
           >
             {{ f }}
@@ -85,11 +139,22 @@ const hasTwo = computed(() => props.criteria.length > 1)
     </div>
 
     <div class="legend">
-      <span class="legend__item"><i class="swatch swatch--bhatta"></i>Бхаттачарья</span>
-      <span v-if="hasTwo" class="legend__item"><i class="swatch swatch--knn"></i>kNN</span>
-      <span v-if="hasTwo" class="legend__item"><i class="swatch swatch--both"></i>оба критерия</span>
-      <span class="legend__item"><i class="swatch"></i>не отобран</span>
+      <span v-for="c in withColors" :key="c.id" class="legend__item">
+        <i class="swatch" :style="{ background: paint(c.tone) }"></i>{{ c.name ?? c.id }}
+      </span>
+      <span class="legend__item">
+        <i class="swatch"></i>не отобран
+      </span>
+      <span v-if="withColors.length > 1" class="legend__note">
+        Полосатая ячейка — признак выбрали несколько критериев
+      </span>
     </div>
+
+    <p v-if="commonCount !== null" class="summary">
+      Выбрали все критерии сразу:
+      <span class="num">{{ commonCount }}</span> из
+      <span class="num">{{ allFeatures.length }}</span>
+    </p>
   </div>
 </template>
 
@@ -128,22 +193,10 @@ const hasTwo = computed(() => props.criteria.length > 1)
   white-space: nowrap;
 }
 
-/* Отобранные заливаются сплошным цветом своего критерия — так сетка
-   читается с одного взгляда, а не требует вглядываться в оттенки. */
-.cell--bhatta { background: var(--forest); color: #fff; font-weight: 500; }
-.cell--knn    { background: var(--gold);   color: #fff; font-weight: 500; }
-
-/* Выбранный обоими: половина одного цвета, половина другого,
-   резкая граница — сразу видно, что критерии сошлись. */
-.cell--both {
-  background: linear-gradient(105deg, var(--forest) 50%, var(--gold) 50%);
-  color: #fff;
-  font-weight: 500;
-}
-
 .legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.4rem 1.1rem;
   margin-top: 1.3rem;
   font-size: 0.78rem;
@@ -152,15 +205,23 @@ const hasTwo = computed(() => props.criteria.length > 1)
 
 .legend__item { display: inline-flex; align-items: center; gap: 0.4rem; }
 
+.legend__note {
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+}
+
 .swatch {
   width: 11px;
   height: 11px;
   border-radius: 2px;
   background: var(--surface-sunk);
   display: inline-block;
+  flex-shrink: 0;
 }
 
-.swatch--bhatta { background: var(--forest); }
-.swatch--knn    { background: var(--gold); }
-.swatch--both   { background: linear-gradient(105deg, var(--forest) 50%, var(--gold) 50%); }
+.summary {
+  margin: 1.1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
 </style>

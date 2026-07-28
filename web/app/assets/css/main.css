@@ -27,6 +27,8 @@
   --forest-tint: #CFE3D8;
   --gold:        #9C620F;   /* kNN */
   --gold-tint:   #F2DFB8;
+  --plum:        #6B3A7A;   /* Махаланобис */
+  --plum-tint:   #E4D5E9;
 
   --danger:      #A03528;
   --danger-tint: #F7E9E7;
@@ -267,9 +269,10 @@ a { color: var(--forest); }
   white-space: nowrap;
 }
 
-.tag--bhatta { background: var(--forest); color: #fff; }
-.tag--knn    { background: var(--gold);   color: #fff; }
-.tag--both   { background: var(--surface-sunk); color: var(--ink-soft); }
+/* Цвет метки приходит из описания критерия (inline-стилем), поэтому
+   добавление нового критерия не требует правки стилей. */
+.tag--criterion { color: #fff; background: var(--ink-soft); }
+.tag--both      { background: var(--surface-sunk); color: var(--ink-soft); }
 
 /* --------------------------------------------------------------------------
    ПРОГРЕСС

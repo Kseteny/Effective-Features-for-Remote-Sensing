@@ -165,12 +165,10 @@ def run(cfg: ExperimentConfig = None):
     for method_name, spec in SELECTOR_REGISTRY.items():
         print(f"\n  >>> Критерий: {method_name} ({spec['kind']})")
         _tm = time.perf_counter()
-        func = spec['func']
-        if spec['needs_target_classes']:
-            sel, hist = func(dataset, mask, cfg,
-                             target_classes=[int(c) for c in unique_cls])
-        else:
-            sel, hist = func(dataset, mask, cfg)
+        # Все критерии из реестра принимают одинаковые аргументы,
+        # даже если конкретному критерию список классов не нужен
+        sel, hist = spec['func'](dataset, mask, cfg,
+                                 target_classes=[int(c) for c in unique_cls])
         elapsed = time.perf_counter() - _tm
         sel_names = [names[i] for i in sel]
 
@@ -219,10 +217,20 @@ def run(cfg: ExperimentConfig = None):
     print(f"  Классов         : {len(classes_list)}")
     for method_name, r in results_by_method.items():
         print(f"\n  {method_name} ({len(r['names'])}): {r['names']}")
-    if sel_b_names and sel_m_names:
-        common = set(sel_b_names) & set(sel_m_names)
-        if common:
-            print(f"\n  Согласованные ({len(common)}): {sorted(common)}")
+    # Согласованность: что выбрали все критерии сразу и как они
+    # сходятся попарно. Раньше сравнивались ровно два — теперь любое число.
+    sets = {m: set(r['names']) for m, r in results_by_method.items() if r['names']}
+    if len(sets) >= 2:
+        common_all = set.intersection(*sets.values())
+        print(f"\n  Совпало у всех критериев ({len(common_all)}): "
+              f"{sorted(common_all) if common_all else '—'}")
+        if len(sets) > 2:
+            print("  Попарные пересечения:")
+            keys = sorted(sets)
+            for i, a in enumerate(keys):
+                for b in keys[i + 1:]:
+                    both = sets[a] & sets[b]
+                    print(f"    {a} и {b}: {len(both)} — {sorted(both) if both else '—'}")
 
     # --- ЭФФЕКТИВНОСТЬ НАБОРОВ (на контрольной выборке) ---
     print("\n" + "─" * 60 + "\n  ЭФФЕКТИВНОСТЬ НАБОРОВ (контрольная выборка)\n" + "─" * 60)

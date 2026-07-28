@@ -6,14 +6,18 @@ const props = defineProps<{
   values: number[]
   yLabel: string
   asPercent?: boolean
-  /** Идентификатор критерия — от него зависит цвет линии,
-   *  чтобы график совпадал по цвету с меткой в таблице. */
+  /** Название цветового токена критерия (forest / gold / plum) —
+   *  чтобы график совпадал по цвету с меткой в таблице и сеткой. */
   color?: string
 }>()
 
+// Цвета критериев. Ключ — название токена из описания критерия,
+// а не его идентификатор: так новый критерий получает цвет,
+// просто указав существующий токен.
 const PALETTE: Record<string, { line: string; fill: string }> = {
-  knn:           { line: '#9C620F', fill: 'rgba(156, 98, 15, 0.14)' },
-  bhattacharyya: { line: '#14664A', fill: 'rgba(20, 102, 74, 0.14)' },
+  forest: { line: '#14664A', fill: 'rgba(20, 102, 74, 0.14)' },
+  gold:   { line: '#9C620F', fill: 'rgba(156, 98, 15, 0.14)' },
+  plum:   { line: '#6B3A7A', fill: 'rgba(107, 58, 122, 0.14)' },
 }
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -23,7 +27,7 @@ function draw() {
   if (!canvas.value) return
   chart?.destroy()
 
-  const tone = PALETTE[props.color ?? 'bhattacharyya'] ?? PALETTE.bhattacharyya!
+  const tone = PALETTE[props.color ?? 'forest'] ?? PALETTE.forest!
   const shown = props.asPercent ? props.values.map(v => v * 100) : props.values
 
   chart = new Chart(canvas.value, {

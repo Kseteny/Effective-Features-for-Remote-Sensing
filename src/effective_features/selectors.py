@@ -116,6 +116,108 @@ def compute_all_pairwise_distances(stats, classes):
 # ===========================================================================
 # FORWARD SELECTION — БХАТТАЧАРЬЯ (filter)
 # ===========================================================================
+def _class_stats_full(dataset, mask, classes, cfg):
+    """Средние и ковариации по каждому классу — по ВСЕМ признакам сразу.
+
+    Считаем один раз, а дальше для любого подмножества признаков просто
+    вырезаем нужные строки и столбцы. Это ключевая экономия: без неё
+    пришлось бы пересчитывать ковариацию на каждом шаге отбора для каждого
+    признака-кандидата, и метод стал бы не быстрее kNN.
+    """
+    c = dataset.shape[-1]
+    flat = mask.flatten()
+    X = dataset.reshape(-1, c)
+
+    stats = {}
+    for cls in classes:
+        Xc = X[flat == cls]
+        if len(Xc) < c + 2:
+            # Меньше пикселей, чем признаков — ковариация вырождена,
+            # такой класс в расчёте не участвует
+            continue
+        Xc = _cap_class_samples(Xc, cfg.bhatta_max_samples, cfg.random_seed)
+        cov = np.cov(Xc, rowvar=False)
+        cov += np.eye(c) * 1e-6
+        stats[cls] = (np.mean(Xc, axis=0), cov)
+    return stats
+
+
+def forward_selection_maha(dataset, mask, cfg: ExperimentConfig, target_classes=None):
+    """
+    Жадный Forward Selection по расстоянию Махаланобиса.
+
+    В отличие от Бхаттачарьи считается не по одной паре классов, а как
+    среднее по всем парам сразу — то есть учитывает весь набор классов.
+
+    Чем отличается от Бхаттачарьи по существу: расстояние Махаланобиса —
+    это, по сути, первое слагаемое формулы Бхаттачарьи (разница средних
+    с учётом корреляции), без второго слагаемого с логарифмом определителя.
+    Меньше информации, но устойчивее: логарифм определителя на маленькой
+    выборке в многомерном пространстве считается плохо и даёт выбросы
+    на редких классах.
+
+    Возвращает (selected_indices, history_values).
+    """
+    c = dataset.shape[-1]
+    classes = target_classes
+    if classes is None:
+        vals = np.unique(mask)
+        classes = [int(v) for v in vals if v > 0]
+
+    print(f"\n  Forward Selection (Махаланобис): {len(classes)} классов, "
+          f"все пары")
+
+    stats = _class_stats_full(dataset, mask, classes, cfg)
+    usable = sorted(stats.keys())
+    if len(usable) < 2:
+        print(f"     Классов с достаточным числом пикселей: {len(usable)} — отбор невозможен")
+        return [], []
+    if len(usable) < len(classes):
+        skipped = sorted(set(classes) - set(usable))
+        print(f"     Пропущены классы (мало пикселей): {skipped}")
+
+    pairs = [(a, b) for i, a in enumerate(usable) for b in usable[i + 1:]]
+    print(f"     Пар классов: {len(pairs)}")
+
+    def mean_distance(idx):
+        """Среднее расстояние Махаланобиса по всем парам классов
+        для заданного набора признаков."""
+        sel = np.array(idx)
+        total, n = 0.0, 0
+        for a, b in pairs:
+            m1, cov1 = stats[a]
+            m2, cov2 = stats[b]
+            d = mahalanobis_distance(
+                m1[sel], m2[sel],
+                cov1[np.ix_(sel, sel)], cov2[np.ix_(sel, sel)]
+            )
+            if not np.isnan(d):
+                total += d
+                n += 1
+        return total / n if n else 0.0
+
+    selected, cur, history = [], 0.0, []
+    for step in range(cfg.max_features):
+        best_f, best_gain = -1, -np.inf
+        for i in range(c):
+            if i in selected:
+                continue
+            gain = mean_distance(selected + [i]) - cur
+            if gain > best_gain:
+                best_gain, best_f = gain, i
+
+        if best_gain < cfg.eps or best_f == -1:
+            print(f"     Остановка на шаге {step}. Прирост {best_gain:.5f} < {cfg.eps}")
+            break
+
+        selected.append(best_f)
+        cur += best_gain
+        history.append(cur)
+        print(f"     Шаг {step + 1}: признак #{best_f:2d}, D_M={cur:.4f} (+{best_gain:.4f})")
+
+    return selected, history
+
+
 def _bhatta_samples(X1, X2):
     """Расстояние Бхаттачарьи по двум выборкам признаков."""
     if len(X1) < 5 or len(X2) < 5:
@@ -398,17 +500,53 @@ def evaluate_feature_set(dataset, mask, feature_indices, cfg: ExperimentConfig,
 #      возвращает (selected_indices, history)
 #   2. добавить её сюда строкой 'имя': {'func': ..., 'kind': 'filter'|'wrapper'}
 # Пайплайн сам подхватит новый критерий.
-SELECTOR_REGISTRY = {
-    'bhattacharyya': {
-        'func': forward_selection_bhatta,
-        'kind': 'filter',
-        'needs_target_classes': False,
-        'metric_name': 'D_B',
-    },
-    'knn': {
-        'func': forward_selection_knn,
-        'kind': 'wrapper',
-        'needs_target_classes': True,
-        'metric_name': 'Accuracy',
-    },
-}
+# Старый реестр оставлен для совместимости: он собирается из общего
+# (criteria.py), чтобы список критериев был в одном месте. Импорт внутри
+# функции — иначе получится круговая зависимость, ведь criteria.py
+# импортирует функции отбора отсюда.
+def _build_legacy_registry():
+    from .criteria import REGISTRY
+    return {
+        c.id: {
+            'func': c.select,
+            'kind': c.type,
+            'needs_target_classes': True,
+            'metric_name': c.unit,
+        }
+        for c in REGISTRY.values()
+    }
+
+
+class _LazyRegistry(dict):
+    """Ведёт себя как словарь, но наполняется при первом обращении."""
+
+    def _fill(self):
+        if not super().__len__():
+            self.update(_build_legacy_registry())
+
+    def items(self):
+        self._fill()
+        return super().items()
+
+    def keys(self):
+        self._fill()
+        return super().keys()
+
+    def values(self):
+        self._fill()
+        return super().values()
+
+    def __getitem__(self, k):
+        self._fill()
+        return super().__getitem__(k)
+
+    def __iter__(self):
+        self._fill()
+        return super().__iter__()
+
+    def __len__(self):
+        self._fill()
+        return super().__len__()
+
+
+SELECTOR_REGISTRY = _LazyRegistry()

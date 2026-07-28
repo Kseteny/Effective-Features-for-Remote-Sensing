@@ -21,12 +21,24 @@ const busy = computed(() =>
   status.value?.status === 'queued' || status.value?.status === 'running'
 )
 
-function label(id: string) {
-  return id === 'knn' ? 'kNN' : 'Бхаттачарья'
+// Имя и цвет критерия приходят с сервера вместе с результатом,
+// поэтому новый критерий появляется в интерфейсе сам, без правок здесь.
+function label(c: { id: string; name?: string }) {
+  return c.name ?? c.id
 }
 
-function tagClass(id: string) {
-  return id === 'knn' ? 'tag tag--knn' : 'tag tag--bhatta'
+// Запасные значения цветов — чтобы метка не превратилась
+// в белый текст на прозрачном фоне, если токена в стилях не окажется.
+const CRITERION_HEX: Record<string, string> = {
+  forest: '#14664A',
+  gold: '#9C620F',
+  plum: '#6B3A7A',
+}
+
+function tagStyle(c: { color?: string }) {
+  if (!c.color) return {}
+  const fallback = CRITERION_HEX[c.color] ?? '#5A6B62'
+  return { background: `var(--${c.color}, ${fallback})` }
 }
 
 function stopTimer() {
@@ -157,7 +169,7 @@ onUnmounted(stopTimer)
               </thead>
               <tbody>
                 <tr v-for="c in result.criteria" :key="c.id">
-                  <td><span :class="tagClass(c.id)">{{ label(c.id) }}</span></td>
+                  <td><span class="tag tag--criterion" :style="tagStyle(c)">{{ label(c) }}</span></td>
                   <td class="num">{{ c.selected.length }}</td>
                   <td class="num">{{ (c.accuracy * 100).toFixed(1) }}%</td>
                   <td class="num">{{ c.f1_macro.toFixed(3) }}</td>
@@ -182,17 +194,13 @@ onUnmounted(stopTimer)
 
           <ClientOnly>
             <div v-for="c in result.criteria" :key="'ch-' + c.id" class="card">
-              <p class="card__title">
-                {{ c.id === 'knn'
-                  ? 'Точность по шагам отбора'
-                  : 'Расстояние Бхаттачарьи по шагам отбора' }}
-              </p>
+              <p class="card__title">{{ label(c) }} — по шагам отбора</p>
               <SelectionChart
                 :labels="c.selected_names"
                 :values="c.history"
-                :y-label="c.id === 'knn' ? 'Точность, %' : 'D_B'"
-                :as-percent="c.id === 'knn'"
-                :color="c.id"
+                :y-label="c.unit ?? ''"
+                :as-percent="c.unit === 'точность'"
+                :color="c.color"
               />
             </div>
           </ClientOnly>

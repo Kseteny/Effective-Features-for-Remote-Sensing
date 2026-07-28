@@ -24,8 +24,11 @@ export interface Criterion {
   name: string
   type: 'filter' | 'wrapper'
   speed: string
-  pairwise: boolean
+  scope: 'pair' | 'all'
+  unit: string
   description: string
+  classifier_free: boolean
+  color: string
 }
 
 export interface RunStatus {
@@ -40,6 +43,9 @@ export interface RunStatus {
 
 export interface CriterionResult {
   id: string
+  name?: string
+  unit?: string
+  color?: string
   selected: number[]
   selected_names: string[]
   history: number[]

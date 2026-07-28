@@ -8,6 +8,40 @@ const api = config.public.apiBase
 
 const { data, refresh, error } = await useFetch<HistoryResponse>(`${api}/api/history`)
 
+// Описания критериев нужны, чтобы показать в списке их названия и цвета:
+// в самой истории хранятся только идентификаторы.
+const { data: criteriaData } = await useFetch<{
+  items: { id: string; name: string; color: string }[]
+}>(`${api}/api/criteria`)
+
+const criteriaById = computed(() => {
+  const map = new Map<string, { name: string; color: string }>()
+  for (const c of criteriaData.value?.items ?? []) {
+    map.set(c.id, { name: c.name, color: c.color })
+  }
+  return map
+})
+
+/** Короткое имя для тесной таблицы: первое слово названия. */
+function shortLabel(id: string) {
+  const name = criteriaById.value.get(id)?.name
+  if (!name) return id
+  if (id === 'knn') return 'kNN'
+  return name.split(' ').pop() ?? name
+}
+
+const CRITERION_HEX: Record<string, string> = {
+  forest: '#14664A',
+  gold: '#9C620F',
+  plum: '#6B3A7A',
+}
+
+function tagStyle(id: string) {
+  const color = criteriaById.value.get(id)?.color
+  if (!color) return {}
+  return { background: `var(--${color}, ${CRITERION_HEX[color] ?? '#5A6B62'})` }
+}
+
 const presetNames: Record<string, string> = {
   fast: 'Быстрый',
   research: 'Исследовательский',
@@ -20,14 +54,6 @@ function formatDate(iso: string) {
     day: '2-digit', month: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
-}
-
-function label(id: string) {
-  return id === 'knn' ? 'kNN' : 'Бхатт.'
-}
-
-function tagClass(id: string) {
-  return id === 'knn' ? 'tag tag--knn' : 'tag tag--bhatta'
 }
 
 async function remove(taskId: string) {
@@ -78,8 +104,14 @@ async function remove(taskId: string) {
             <td>{{ presetNames[it.preset] ?? it.preset }}</td>
             <td class="num">{{ it.n_pixels?.toLocaleString('ru') ?? '—' }}</td>
             <td class="accs">
-              <span v-for="(acc, crit) in it.accuracies" :key="crit" :class="tagClass(crit)">
-                {{ label(crit) }} {{ (acc * 100).toFixed(1) }}%
+              <span
+                v-for="(acc, crit) in it.accuracies"
+                :key="crit"
+                class="tag tag--criterion"
+                :style="tagStyle(crit)"
+                :title="criteriaById.get(crit)?.name ?? crit"
+              >
+                {{ shortLabel(crit) }} {{ (acc * 100).toFixed(1) }}%
               </span>
             </td>
             <td class="num">{{ it.total_time_sec }} с</td>
