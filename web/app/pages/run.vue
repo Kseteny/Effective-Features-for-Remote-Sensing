@@ -157,7 +157,7 @@ function tagStyle(c: { color?: string }) {
 
           <div class="card">
             <p class="card__title">Что отобрано</p>
-            <FeatureGrid
+            <FeatureSetExplorer
               :all-features="result.dataset.feature_names"
               :criteria="result.criteria"
             />

@@ -41,11 +41,19 @@ export interface RunStatus {
   error: string | null
 }
 
+export interface QualityPoint {
+  k: number
+  accuracy: number
+  f1_macro: number
+}
+
 export interface CriterionResult {
   id: string
   name?: string
   unit?: string
   color?: string
+  /** Качество для каждого размера набора. У старых записей в истории нет. */
+  quality_curve?: QualityPoint[]
   selected: number[]
   selected_names: string[]
   history: number[]

@@ -324,6 +324,22 @@ def _run_task(task: Task):
             ev = evaluate_feature_set(dataset, mask, selected, cfg,
                                       target_classes=target_classes) or {}
             acc = float(ev.get('accuracy', 0))
+
+            # Качество для каждого размера набора: первые k признаков —
+            # это и есть лучший набор из k, потому что отбор идёт по порядку.
+            # Нужно для ползунка на странице: «если признаков три, то вот эти
+            # и вот такое качество».
+            quality_curve = []
+            for k in range(1, len(selected) + 1):
+                check_cancelled()
+                ev_k = evaluate_feature_set(dataset, mask, selected[:k], cfg,
+                                            target_classes=target_classes) or {}
+                quality_curve.append({
+                    'k': k,
+                    'accuracy': round(float(ev_k.get('accuracy', 0)), 4),
+                    'f1_macro': round(float(ev_k.get('f1_macro', 0)), 4),
+                })
+
             results.append({
                 'id': crit_id,
                 'name': criterion.name,
@@ -332,6 +348,7 @@ def _run_task(task: Task):
                 'selected': [int(s) for s in selected],
                 'selected_names': [names[s] for s in selected],
                 'history': [float(h) for h in history],
+                'quality_curve': quality_curve,
                 'accuracy': round(acc, 4),
                 'error_rate': round(1 - acc, 4),
                 'f1_macro': round(float(ev.get('f1_macro', 0)), 4),
