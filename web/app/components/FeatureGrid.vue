@@ -23,7 +23,7 @@ const props = defineProps<{
   criteria: CriterionResult[]
 }>()
 
-const FALLBACK_COLORS = ['forest', 'gold', 'plum']
+const FALLBACK_COLORS = ['forest', 'gold', 'plum', 'water']
 
 // Запасные значения цветов.
 // Без них любая опечатка в названии токена или незамеченная правка стилей
@@ -34,6 +34,7 @@ const HEX: Record<string, string> = {
   forest: '#14664A',
   gold: '#9C620F',
   plum: '#6B3A7A',
+  water: '#276B96',
 }
 
 function paint(tone: string): string {

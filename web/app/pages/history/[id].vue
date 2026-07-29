@@ -24,6 +24,7 @@ const CRITERION_HEX: Record<string, string> = {
   forest: '#14664A',
   gold: '#9C620F',
   plum: '#6B3A7A',
+  water: '#276B96',
 }
 
 function tagStyle(c: { color?: string }) {

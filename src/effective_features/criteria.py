@@ -19,6 +19,7 @@ from typing import Callable, Dict, List, Optional
 from .selectors import (
     forward_selection_bhatta,
     forward_selection_maha,
+    forward_selection_mi,
     forward_selection_knn,
 )
 
@@ -57,6 +58,12 @@ def _maha(dataset, mask, cfg, target_classes=None, should_stop=None):
                                   should_stop=should_stop)
 
 
+def _mi(dataset, mask, cfg, target_classes=None, should_stop=None):
+    return forward_selection_mi(dataset, mask, cfg,
+                                target_classes=target_classes,
+                                should_stop=should_stop)
+
+
 def _knn(dataset, mask, cfg, target_classes=None, should_stop=None):
     return forward_selection_knn(dataset, mask, cfg,
                                  target_classes=target_classes,
@@ -93,6 +100,22 @@ REGISTRY: Dict[str, Criterion] = {
         ),
         select=_maha,
         color='plum',
+    ),
+    'mutual_info': Criterion(
+        id='mutual_info',
+        name='Взаимная информация',
+        type='filter',
+        speed='medium',
+        scope='all',
+        unit='mRMR',
+        description=(
+            'Оценивает, насколько знание признака уменьшает неопределённость '
+            'в классе. Не предполагает нормального распределения, в отличие '
+            'от расстояний. Из оценки вычитается похожесть на уже отобранные '
+            'признаки, чтобы в набор не попадали дубликаты.'
+        ),
+        select=_mi,
+        color='water',
     ),
     'knn': Criterion(
         id='knn',

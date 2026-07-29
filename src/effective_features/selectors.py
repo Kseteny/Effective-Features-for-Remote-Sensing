@@ -19,6 +19,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.feature_selection import mutual_info_classif
 
 from .config import ExperimentConfig, CLASS_NAMES
 
@@ -235,6 +236,102 @@ def forward_selection_maha(dataset, mask, cfg: ExperimentConfig,
         cur += best_gain
         history.append(cur)
         print(f"     Шаг {step + 1}: признак #{best_f:2d}, D_M={cur:.4f} (+{best_gain:.4f})")
+
+    return selected, history
+
+
+def forward_selection_mi(dataset, mask, cfg: ExperimentConfig,
+                         target_classes=None, should_stop=None):
+    """
+    Жадный Forward Selection по взаимной информации с поправкой
+    на избыточность (схема mRMR).
+
+    Чем отличается от остальных критериев. Бхаттачарья и Махаланобис
+    предполагают, что классы распределены нормально — считают средние
+    и ковариации. Взаимная информация ничего такого не предполагает:
+    она измеряет, насколько знание признака уменьшает неопределённость
+    в классе, при любой форме зависимости.
+
+    Почему не чистая взаимная информация. Она оценивает каждый признак
+    отдельно от остальных. Если два признака почти дублируют друг друга,
+    оба получат высокую оценку и оба попадут в набор — а второй ничего
+    не добавит. Поэтому на каждом шаге из релевантности вычитается
+    избыточность: насколько кандидат похож на уже отобранные.
+
+    Похожесть меряется корреляцией — это второе, что интересовало
+    научного руководителя: «насколько они коррелированы, насколько они
+    несут взаимную информацию».
+
+    Возвращает (selected_indices, history_values).
+    """
+    c = dataset.shape[-1]
+    flat = mask.flatten()
+    X_all = dataset.reshape(-1, c)
+    y_all = flat
+
+    keep = y_all > 0
+    X_all, y_all = X_all[keep], y_all[keep]
+
+    if len(y_all) < 50:
+        print(f"     Слишком мало размеченных пикселей: {len(y_all)}")
+        return [], []
+
+    # Взаимная информация считается небыстро, поэтому берём подвыборку —
+    # ту же, что используется для kNN, чтобы критерии смотрели
+    # на сопоставимые данные.
+    X, y = stratified_subsample(X_all, y_all, cfg.knn_max_samples, cfg.random_seed)
+
+    print(f"\n  Forward Selection (взаимная информация): {len(X):,} пкс, "
+          f"{len(np.unique(y))} классов")
+
+    _check_stop(should_stop)
+
+    # Оба слагаемых считаются один раз по всем признакам, дальше отбор
+    # только берёт из них нужные значения — иначе метод был бы медленным.
+    relevance = mutual_info_classif(X, y, random_state=cfg.random_seed)
+    _check_stop(should_stop)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        corr = np.abs(np.corrcoef(X, rowvar=False))
+    corr = np.nan_to_num(corr, nan=0.0)
+
+    # Релевантность приводим к диапазону 0…1: она измеряется в натах,
+    # а избыточность — в долях единицы, и вычитать их напрямую
+    # означало бы сравнивать несопоставимое.
+    top = float(np.max(relevance))
+    if top <= 0:
+        print("     Ни один признак не несёт информации о классе")
+        return [], []
+    relevance = relevance / top
+
+    print(f"     Самый информативный признак: #{int(np.argmax(relevance))}")
+
+    selected, cur, history = [], 0.0, []
+    for step in range(cfg.max_features):
+        best_f, best_score = -1, -np.inf
+        for i in range(c):
+            if i in selected:
+                continue
+            _check_stop(should_stop)
+            # Берём максимум, а не среднее. Со средним признак, дублирующий
+            # один из уже выбранных, размывал бы штраф по всему набору
+            # и всё равно проходил: похож на один из трёх — штраф лишь треть.
+            # С максимумом достаточно совпасть с любым одним.
+            redundancy = float(np.max(corr[i, selected])) if selected else 0.0
+            score = float(relevance[i]) - redundancy
+            if score > best_score:
+                best_score, best_f = score, i
+
+        if best_score < cfg.eps or best_f == -1:
+            print(f"     Остановка на шаге {step}. Прирост {best_score:.5f} < {cfg.eps}")
+            break
+
+        selected.append(best_f)
+        cur += best_score
+        history.append(cur)
+        print(f"     Шаг {step + 1}: признак #{best_f:2d}, mRMR={cur:.4f} "
+              f"(+{best_score:.4f})")
 
     return selected, history
 

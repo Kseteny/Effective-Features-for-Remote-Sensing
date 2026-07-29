@@ -18,6 +18,7 @@ const PALETTE: Record<string, { line: string; fill: string }> = {
   forest: { line: '#14664A', fill: 'rgba(20, 102, 74, 0.14)' },
   gold:   { line: '#9C620F', fill: 'rgba(156, 98, 15, 0.14)' },
   plum:   { line: '#6B3A7A', fill: 'rgba(107, 58, 122, 0.14)' },
+  water:  { line: '#276B96', fill: 'rgba(39, 107, 150, 0.14)' },
 }
 
 const canvas = ref<HTMLCanvasElement | null>(null)

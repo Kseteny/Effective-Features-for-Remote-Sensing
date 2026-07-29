@@ -29,6 +29,8 @@
   --gold-tint:   #F2DFB8;
   --plum:        #6B3A7A;   /* Махаланобис */
   --plum-tint:   #E4D5E9;
+  --water:       #276B96;   /* Взаимная информация */
+  --water-tint:  #D3E3EE;
 
   --danger:      #A03528;
   --danger-tint: #F7E9E7;
@@ -380,3 +382,27 @@ a { color: var(--forest); }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* --------------------------------------------------------------------------
+   ПОДВАЛ
+   -------------------------------------------------------------------------- */
+.site-foot {
+  border-top: 1px solid var(--line);
+  margin-top: 3rem;
+  background: var(--surface);
+}
+
+.site-foot__inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.2rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+.site-foot__inner a { color: var(--ink-soft); text-decoration: none; }
+.site-foot__inner a:hover { color: var(--forest); text-decoration: underline; }
