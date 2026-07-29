@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Preset, Criterion, RunStatus, RunResult } from '~/types/api'
+import type { Preset, Criterion } from '~/types/api'
 
 useHead({ title: 'Расчёт' })
 
@@ -9,38 +9,28 @@ const api = config.public.apiBase
 const { data: presetsData } = await useFetch<{ items: Preset[] }>(`${api}/api/presets`)
 const { data: criteriaData } = await useFetch<{ items: Criterion[] }>(`${api}/api/criteria`)
 
-const preset = ref('thinned')
-const chosen = ref<string[]>(['bhattacharyya', 'knn'])
+// Настройки тоже в useState: иначе при возвращении на страницу
+// результат остался бы на месте, а галочки сбросились — выглядело бы
+// так, будто расчёт шёл с другими параметрами.
+const preset = useState<string>('run:preset', () => 'thinned')
+const chosen = useState<string[]>('run:criteria', () => ['bhattacharyya', 'mahalanobis'])
 
-const status = ref<RunStatus | null>(null)
-const result = ref<RunResult | null>(null)
-const errorText = ref('')
-let timer: ReturnType<typeof setInterval> | null = null
+// Состояние расчёта вынесено в композабл: так оно переживает переход
+// на другую страницу и возвращение обратно, а если страницу перезагрузили —
+// подхватывается с сервера.
+const {
+  status, result, errorText, cancelling,
+  busy, cancelled,
+  start: startRun, cancel, resume,
+} = useRun()
 
-const busy = computed(() =>
-  status.value?.status === 'queued' || status.value?.status === 'running'
-)
+// При открытии страницы проверяем, не идёт ли уже расчёт
+onMounted(resume)
 
-const cancelled = computed(() => status.value?.status === 'cancelled')
-
-// Отдельный признак: запрос на отмену уже отправлен, но расчёт
-// ещё не остановился. Нужен, чтобы кнопка не позволяла нажать дважды.
-const cancelling = ref(false)
-
-async function cancel() {
-  const id = status.value?.task_id
-  if (!id) return
-  cancelling.value = true
-  try {
-    await $fetch(`${api}/api/runs/${id}/cancel`, { method: 'POST' })
-  } catch {
-    // Расчёт мог успеть закончиться сам — тогда отменять уже нечего
-    cancelling.value = false
-  }
+function start() {
+  startRun(preset.value, chosen.value)
 }
 
-// Имя и цвет критерия приходят с сервера вместе с результатом,
-// поэтому новый критерий появляется в интерфейсе сам, без правок здесь.
 function label(c: { id: string; name?: string }) {
   return c.name ?? c.id
 }
@@ -58,57 +48,6 @@ function tagStyle(c: { color?: string }) {
   const fallback = CRITERION_HEX[c.color] ?? '#5A6B62'
   return { background: `var(--${c.color}, ${fallback})` }
 }
-
-function stopTimer() {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-
-async function start() {
-  errorText.value = ''
-  result.value = null
-  status.value = null
-  cancelling.value = false
-
-  try {
-    const started = await $fetch<{ task_id: string }>(`${api}/api/runs`, {
-      method: 'POST',
-      body: { preset: preset.value, criteria: chosen.value },
-    })
-    poll(started.task_id)
-  } catch (e: any) {
-    errorText.value = e?.data?.detail ?? 'Сервер расчётов не отвечает. Проверьте, запущен ли он.'
-  }
-}
-
-function poll(taskId: string) {
-  stopTimer()
-  timer = setInterval(async () => {
-    try {
-      const s = await $fetch<RunStatus>(`${api}/api/runs/${taskId}`)
-      status.value = s
-
-      if (s.status === 'done') {
-        stopTimer()
-        result.value = await $fetch<RunResult>(`${api}/api/runs/${taskId}/result`)
-      } else if (s.status === 'cancelled') {
-        stopTimer()
-        cancelling.value = false
-      } else if (s.status === 'failed') {
-        stopTimer()
-        cancelling.value = false
-        errorText.value = s.error ?? 'Расчёт прервался'
-      }
-    } catch {
-      stopTimer()
-      errorText.value = 'Связь с сервером потеряна'
-    }
-  }, 1500)
-}
-
-onUnmounted(stopTimer)
 </script>
 
 <template>

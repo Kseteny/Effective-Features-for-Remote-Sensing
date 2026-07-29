@@ -415,6 +415,36 @@ def create_run(req: RunRequest):
             'created_at': task.created_at.isoformat()}
 
 
+@app.get("/api/runs")
+def list_runs(active_only: bool = True):
+    """Список задач в памяти сервера.
+
+    Нужен, чтобы страница могла подхватить уже идущий расчёт — например,
+    после обновления страницы или если её открыли в другой вкладке.
+    Сам расчёт идёт в фоновом потоке и не зависит от того, смотрит
+    на него кто-нибудь или нет.
+    """
+    with TASKS_LOCK:
+        tasks = list(TASKS.values())
+
+    items = [
+        {
+            'task_id': t.id,
+            'status': t.status,
+            'stage': t.stage,
+            'progress': round(t.progress, 3),
+            'elapsed_sec': t.elapsed(),
+            'preset': t.req.preset,
+            'criteria': list(t.req.criteria),
+            'created_at': t.created_at.isoformat(),
+        }
+        for t in tasks
+        if not active_only or t.status in ('queued', 'running')
+    ]
+    items.sort(key=lambda x: x['created_at'], reverse=True)
+    return {'items': items, 'total': len(items)}
+
+
 @app.get("/api/runs/{task_id}")
 def get_run(task_id: str):
     task = TASKS.get(task_id)
