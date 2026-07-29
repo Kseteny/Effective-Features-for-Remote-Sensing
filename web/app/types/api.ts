@@ -87,3 +87,31 @@ export interface HistoryResponse {
   items: HistoryItem[]
   total: number
 }
+
+export interface DatasetClass {
+  id: number
+  name: string
+}
+
+export interface DatasetInfo {
+  name: string
+  n_bands: number
+  band_order: string[]
+  band_roles: Record<string, string>
+  feature_bands: string[]
+  n_spectral: number
+  n_textural: number
+  n_features: number
+  n_classes: number
+  classes: DatasetClass[]
+  indices_available: string[]
+  indices_missing: { name: string; needs: string[] }[]
+  n_pairs: number | null
+}
+
+export interface DatasetReport {
+  ok: boolean
+  dataset?: DatasetInfo
+  notes?: string[]
+  error?: string
+}
