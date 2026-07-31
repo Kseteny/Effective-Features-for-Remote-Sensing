@@ -1,10 +1,8 @@
 """
-check_dataset.py — проверка датасета перед запуском.
+check_dataset.py - проверка датасета перед запуском.
 
 Читает описание, сопоставляет снимки с масками, сверяет число каналов
-и говорит, что получится посчитать на этих данных. Полезно запускать
-первым делом на чужих данных: ошибку в описании лучше увидеть сразу,
-а не через сорок минут расчёта.
+и говорит, что получится посчитать на этих данных.
 
 Запуск:
     python -m effective_features.check_dataset            # dataset.json в корне
@@ -18,7 +16,7 @@ from .dataset import check, DatasetError, _plural
 
 def main(path: str = None):
     if path is None:
-        # По умолчанию ищем в корне проекта — на уровень выше src/
+        # По умолчанию ищем в корне проекта - на уровень выше src/
         here = os.path.dirname(os.path.abspath(__file__))
         path = os.path.dirname(os.path.dirname(here))
 
@@ -37,9 +35,9 @@ def main(path: str = None):
     pairs = d['n_pairs']
 
     print(f"\n  {d['name']}")
-    print(f"  {'—' * 50}")
+    print(f"  {'-' * 50}")
     print(f"  Пар снимок-маска: {pairs}")
-    print(f"  Каналов в файле: {d['n_bands']} — {', '.join(d['band_order'])}")
+    print(f"  Каналов в файле: {d['n_bands']} - {', '.join(d['band_order'])}")
 
     fb = d['feature_bands']
     if len(fb) != d['n_bands']:

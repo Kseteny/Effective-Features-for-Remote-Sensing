@@ -1,5 +1,5 @@
 """
-run_experiment.py — единая точка запуска.
+run_experiment.py - единая точка запуска.
 
 Из папки src/:
     python -m effective_features.run_experiment
@@ -29,10 +29,10 @@ PRESETS = {
 }
 
 DESCRIPTIONS = {
-    'fast':     'Быстрый — 10 патчей, для отладки (пара минут)',
-    'research': 'Исследовательский — 50 патчей, основной режим',
-    'thinned':  'Прореживание — ~150 патчей систематически, гарантия всех классов',
-    'full':     'Полный — весь датасет, для финального результата (долго)',
+    'fast':     'Быстрый - 10 патчей, для отладки (пара минут)',
+    'research': 'Исследовательский - 50 патчей, основной режим',
+    'thinned':  'Прореживание - ~150 патчей систематически, гарантия всех классов',
+    'full':     'Полный - весь датасет, для финального результата (долго)',
 }
 
 
@@ -41,7 +41,7 @@ def _choose_mode():
     visible = ['fast', 'research', 'thinned', 'full']   # что показываем в списке
     print("\n  Выберите режим:\n")
     for i, m in enumerate(visible, 1):
-        print(f"    {i}. {m:<10s} — {DESCRIPTIONS[m]}")
+        print(f"    {i}. {m:<10s} - {DESCRIPTIONS[m]}")
     print()
     while True:
         choice = input(f"  Режим (1-{len(visible)} или название): ").strip().lower()
@@ -61,7 +61,7 @@ def _choose_seeds():
       • 'rand' или 'r'    → случайные сиды (спросит, сколько)
       • Enter             → 42 (по умолчанию)
 
-    Случайные сиды печатаются и сохраняются — эксперимент остаётся
+    Случайные сиды печатаются и сохраняются - эксперимент остаётся
     воспроизводимым (можно вписать те же числа повторно).
     """
     import random as _random
@@ -90,7 +90,7 @@ def _choose_seeds():
 def _single_run(mode, seed):
     """Одиночный запуск (результаты в output/ и results/, как обычно)."""
     cfg = replace(PRESETS[mode], random_seed=seed)
-    print(f"\n  Режим: '{mode}' — {DESCRIPTIONS[mode]}")
+    print(f"\n  Режим: '{mode}' - {DESCRIPTIONS[mode]}")
     print(f"  Seed:  {seed}\n")
     run(cfg)
 
@@ -110,7 +110,7 @@ def _batch_run(mode, seeds):
     for idx, seed in enumerate(seeds, 1):
         tag = f"{mode}_seed{seed}"
         print(f"\n\n{'#' * 70}")
-        print(f"#  ЗАПУСК {idx}/{len(seeds)} — seed={seed}  (папка: results/{tag}/)")
+        print(f"#  ЗАПУСК {idx}/{len(seeds)} - seed={seed}  (папка: results/{tag}/)")
         print(f"{'#' * 70}")
         _t = time.perf_counter()
         cfg = replace(PRESETS[mode], random_seed=seed, run_tag=tag)
@@ -133,7 +133,7 @@ def _batch_run(mode, seeds):
     print(f"\n\n{'=' * 70}")
     print(f"  СРАВНЕНИЕ {len(seeds)} ЗАПУСКОВ → results/{mode}_comparison/")
     print(f"{'=' * 70}")
-    # Передаём тайминги серии в сравнение — попадут в summary.txt
+    # Передаём тайминги серии в сравнение - попадут в summary.txt
     compare_runs(runs, comparison_dir,
                  series_time=total_series, per_run_times=per_run_times,
                  mode=mode)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         if mode in ('full', 'thinned'):
             # В этих режимах выбор патчей не случайный (весь датасет либо
             # систематический шаг + добор редких классов), поэтому серия
-            # по нескольким сидам не имеет смысла — одиночный запуск
+            # по нескольким сидам не имеет смысла - одиночный запуск
             # с дефолтным seed=42.
             seeds = [42]
             note = ('используется весь датасет, все 1911' if mode == 'full'

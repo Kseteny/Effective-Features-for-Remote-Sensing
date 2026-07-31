@@ -1,10 +1,10 @@
 """
-features.py — вычисление базового признакового пространства (41 признак)
+features.py - вычисление базового признакового пространства (41 признак)
 и загрузка данных датасета MultiSenGE (Sentinel-2).
 
 Базовый набор (41):
-  9 спектральных   — 6 нормализованных каналов + NDVI/NDWI/NDBI
-  32 текстурных    — 8 производных × 4 окна {3,5,7,9}:
+  9 спектральных   - 6 нормализованных каналов + NDVI/NDWI/NDBI
+  32 текстурных    - 8 производных × 4 окна {3,5,7,9}:
                      Mean, Var, Rho_0, Rho_90, Rho_45, Rho_135, Rho_Avg, Rho_Range
 
 Первичные признаки (Сумма, Сумма², произведения, Min, Max) используются
@@ -27,16 +27,12 @@ except ImportError:
     HAS_RASTERIO = False
 
 
-# ===========================================================================
-# ВЫЧИСЛЕНИЕ ПРИЗНАКОВ
-# ===========================================================================
-
 def get_fast_stats(image, window_size):
     """
     Локальные среднее (Mean) и дисперсия (Var) за O(1) на пиксель
     через интегральное изображение (uniform_filter).
 
-    Var = E[I²] − (E[I])²   — формула (5) НИР.
+    Var = E[I²] − (E[I])²   - формула (5) НИР.
     Возвращает (mean, var).
     """
     img64   = image.astype(np.float64)
@@ -82,7 +78,7 @@ def compute_spectral_features(image, spec):
     band_names = spec.bands_for_features()
     idx = [spec.band_order.index(b) for b in band_names]
     base = np.stack([image[i] for i in idx], axis=0)
-    total = np.sum(base, axis=0)                  # S — сырьё, в признаки не идёт
+    total = np.sum(base, axis=0)                  # S - сырьё, в признаки не идёт
 
     for i, name in enumerate(band_names):
         out[f'Norm_{name}'] = (base[i] / (total + eps)).astype(np.float32)
@@ -93,7 +89,7 @@ def compute_spectral_features(image, spec):
         return None if i is None else image[i]
 
     def ratio(a, b):
-        """Нормализованная разность (a − b) / (a + b) — общая форма
+        """Нормализованная разность (a − b) / (a + b) - общая форма
         для NDVI, NDWI и NDBI."""
         return ((a - b) / (a + b + eps)).astype(np.float32)
 
@@ -123,7 +119,7 @@ def extract_all_features(image, cfg: ExperimentConfig):
 
     spec = cfg.spec if image.ndim == 3 else None
 
-    # Яркость для текстурных признаков — среднее по тем каналам,
+    # Яркость для текстурных признаков - среднее по тем каналам,
     # что идут в признаки. Если описания нет, берём все.
     if spec is not None and cfg.use_spectral:
         idx = [spec.band_order.index(b) for b in spec.bands_for_features()]
@@ -141,7 +137,7 @@ def extract_all_features(image, cfg: ExperimentConfig):
     for set_id in cfg.active_feature_sets():
         fset = fsets.get(set_id)
         if fset is None:
-            print(f"    Набор «{set_id}» не найден — пропускаю")
+            print(f"    Набор «{set_id}» не найден - пропускаю")
             continue
         if not fset.is_available(ctx):
             print(f"    Набор «{fset.name}» пропущен: нужен многоканальный снимок")
@@ -156,7 +152,7 @@ def extract_all_features(image, cfg: ExperimentConfig):
 
         clash = set(produced) & set(fs)
         if clash:
-            print(f"    Набор «{fset.name}»: имена уже заняты, пропускаю их — "
+            print(f"    Набор «{fset.name}»: имена уже заняты, пропускаю их - "
                   f"{', '.join(sorted(clash))}")
             produced = {k: v for k, v in produced.items() if k not in clash}
 
@@ -180,10 +176,6 @@ def parse_feature_window(name):
     return None
 
 
-# ===========================================================================
-# ЗАГРУЗКА ДАННЫХ (MultiSenGE)
-# ===========================================================================
-
 def load_pair(img_name, mask_name, spec):
     """Загружает снимок (C,H,W) float32 и маску (H,W) uint8.
     Пути берутся из описания датасета."""
@@ -196,7 +188,7 @@ def load_pair(img_name, mask_name, spec):
 
 def _read_mask_classes(mask_name, spec):
     """Быстро читает только маску патча и возвращает множество классов
-    в ней (без нулей = фон). Используется только для прореживания —
+    в ней (без нулей = фон). Используется только для прореживания -
     признаки при этом НЕ считаются, так что это дёшево."""
     with rasterio.open(os.path.join(spec.masks_path, mask_name.strip())) as f:
         mask = f.read(1)
@@ -205,15 +197,13 @@ def _read_mask_classes(mask_name, spec):
 
 def select_pairs_thinned(pairs, cfg: ExperimentConfig, spec):
     """
-    Систематическое прореживание (предложено В.В. Сергеевым): вместо
-    случайной выборки патчей берём каждый k-й патч ПО ПОРЯДКУ — это даёт
+    Систематическое прореживание вместо случайной выборки патчей берём каждый k-й патч ПО ПОРЯДКУ - это даёт
     равномерное покрытие датасета без лишней случайности.
-
-    Проблема чистого прореживания: самые редкие классы (напр. Торфяники —
-    ~8 тыс. пикселей на весь датасет из 1911 патчей, Хвойные леса — ~16 тыс.)
+    Проблема чистого прореживания: самые редкие классы (напр. Торфяники -
+    ~8 тыс. пикселей на весь датасет из 1911 патчей, Хвойные леса - ~16 тыс.)
     могут не попасть НИ В ОДИН патч выборки просто по шагу. Поэтому после
     систематического отбора мы сканируем маски (только слой разметки,
-    без вычисления признаков — быстро) и явно добираем патчи, которые
+    без вычисления признаков - быстро) и явно добираем патчи, которые
     закрывают классы, которых не хватает.
     """
     n_total = len(pairs)
@@ -233,7 +223,7 @@ def select_pairs_thinned(pairs, cfg: ExperimentConfig, spec):
     all_classes = set(cfg.class_names().keys())
     missing = all_classes - covered
     if missing:
-        print(f"  Не хватает классов: {sorted(missing)} — ищу патчи, где они есть...")
+        print(f"  Не хватает классов: {sorted(missing)} - ищу патчи, где они есть...")
         for img, msk in pairs:
             if not missing:
                 break
@@ -374,7 +364,7 @@ def get_patch_features(cfg, img_name, raw_img):
 def load_all_data(cfg: ExperimentConfig):
     """
     Полный цикл загрузки: патчи → признаки → объединённая выборка (X, y, names).
-    Какие данные читать и как их разбирать — берётся из dataset.json.
+    Какие данные читать и как их разбирать - берётся из dataset.json.
     Признаки патчей кешируются (см. cfg.use_cache / save_cache / force_recompute).
     """
     if not HAS_RASTERIO:
@@ -400,7 +390,7 @@ def load_all_data(cfg: ExperimentConfig):
             cached = (cfg.use_cache and not cfg.force_recompute
                       and os.path.isfile(cache_path))
 
-            # Маску надо прочитать всегда (она не кешируется — лёгкая)
+            # Маску надо прочитать всегда (она не кешируется - лёгкая)
             raw_img, patch_mask = load_pair(img_name, mask_name, spec)
 
             cube, patch_names = get_patch_features(cfg, img_name, raw_img)
@@ -433,10 +423,6 @@ def load_all_data(cfg: ExperimentConfig):
     if not X_parts or total_pixels < 100:
         raise RuntimeError("Данные не загружены. Проверьте data/ и lists/.")
 
-    # Один concatenate вместо vstack на каждой итерации: раньше сложность
-    # росла квадратично (на 1911 патчах при полном датасете это критично —
-    # склейка ближе к концу копировала бы уже весь накопленный массив
-    # на каждом шаге), теперь — линейно.
     X_global = np.concatenate(X_parts, axis=0)
     y_global = np.concatenate(y_parts, axis=0)
 

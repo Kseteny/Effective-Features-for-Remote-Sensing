@@ -61,7 +61,7 @@ function usedInFeatures(band: string): boolean {
         <p class="card__title">{{ info.name }}</p>
         <div class="stats">
           <div class="stats__item">
-            <div class="stats__num num">{{ info.n_pairs ?? '—' }}</div>
+            <div class="stats__num num">{{ info.n_pairs ?? '-' }}</div>
             <div class="stats__label">пар снимок-маска</div>
           </div>
           <div class="stats__item">
@@ -82,7 +82,7 @@ function usedInFeatures(band: string): boolean {
       <div class="card">
         <p class="card__title">Каналы</p>
         <p class="muted note">
-          В признаки идут не обязательно все каналы — только те,
+          В признаки идут не обязательно все каналы - только те,
           что указаны в описании. Остальные читаются из файла,
           но в расчёте не участвуют.
         </p>
@@ -105,13 +105,13 @@ function usedInFeatures(band: string): boolean {
           Посчитаются: <b>{{ info.indices_available.join(', ') }}</b>
         </p>
         <p v-else class="muted">
-          Ни один индекс не посчитается — не заданы роли каналов.
+          Ни один индекс не посчитается - не заданы роли каналов.
           Останутся только текстурные признаки.
         </p>
 
         <ul v-if="info.indices_missing.length" class="missing">
           <li v-for="m in info.indices_missing" :key="m.name">
-            <b>{{ m.name }}</b> не посчитается — не заданы роли:
+            <b>{{ m.name }}</b> не посчитается - не заданы роли:
             {{ m.needs.join(', ') }}
           </li>
         </ul>
@@ -121,7 +121,7 @@ function usedInFeatures(band: string): boolean {
         <p class="card__title">Наборы признаков</p>
         <p class="muted note">
           Свой набор можно добавить, не трогая код программы: положите файл
-          в папку <code>user_features</code> рядом с проектом. Как —
+          в папку <code>user_features</code> рядом с проектом. Как -
           написано на странице <NuxtLink to="/docs/methods">«Методы»</NuxtLink>.
         </p>
         <div class="sets">
@@ -138,7 +138,7 @@ function usedInFeatures(band: string): boolean {
       <div class="card">
         <p class="card__title">Классы</p>
         <p v-if="!info.classes.length" class="muted">
-          Названия классов не заданы — в интерфейсе будут номера.
+          Названия классов не заданы - в интерфейсе будут номера.
         </p>
         <div v-else class="classes">
           <div v-for="c in info.classes" :key="c.id" class="class-row">
@@ -199,7 +199,7 @@ code {
 
 .band__role { display: block; font-size: 0.7rem; color: var(--ink-faint); }
 
-/* Канал, который не идёт в признаки: приглушён, но не спрятан —
+/* Канал, который не идёт в признаки: приглушён, но не спрятан -
    важно видеть, что он в файле есть. */
 .band--off { background: var(--surface-sunk); opacity: 0.65; }
 .band--off .band__name { font-weight: 400; }

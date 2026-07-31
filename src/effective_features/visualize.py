@@ -1,14 +1,14 @@
 ﻿"""
-visualize.py — построение итоговых рисунков эксперимента.
+visualize.py - построение итоговых рисунков эксперимента.
 
 Рисунки:
-  graph_01 — Матрица корреляций Пирсона признакового пространства
-  graph_02 — Тепловая карта расстояний Бхаттачарьи
-  graph_03 — Тепловая карта расстояний Махаланобиса
-  graph_04 — Кривая Forward Selection (Бхаттачарья)
-  graph_05 — Кривая Forward Selection (kNN Accuracy)
-  graph_06 — Частота выбора признаков по размерам окна
-  graph_07 — Согласованность критериев отбора
+  graph_01 - Матрица корреляций Пирсона признакового пространства
+  graph_02 - Тепловая карта расстояний Бхаттачарьи
+  graph_03 - Тепловая карта расстояний Махаланобиса
+  graph_04 - Кривая Forward Selection (Бхаттачарья)
+  graph_05 - Кривая Forward Selection (kNN Accuracy)
+  graph_06 - Частота выбора признаков по размерам окна
+  graph_07 - Согласованность критериев отбора
 """
 
 import io
@@ -38,7 +38,7 @@ def plot_feature_correlation(dataset, mask, names, out_dir):
     """Матрица корреляций Пирсона; пары |r|>0.90 выделены золотой рамкой."""
     X = dataset.reshape(-1, dataset.shape[-1])[mask.flatten() > 0]
     if len(X) < 10:
-        print("     Мало данных — рисунок 1 пропущен"); return
+        print("     Мало данных - рисунок 1 пропущен"); return
     corr = np.corrcoef(X.T)
     n = len(names)
     fig, ax = plt.subplots(figsize=(max(12, n * 0.4), max(10, n * 0.35)))
@@ -97,7 +97,7 @@ def plot_maha_heatmap(df_maha, out_dir):
 def plot_bhatta_forward(history, sel_names, out_dir):
     """Кривая Forward Selection по критерию Бхаттачарьи."""
     if not history:
-        print("     Нет данных — рисунок 4 пропущен"); return
+        print("     Нет данных - рисунок 4 пропущен"); return
     x = list(range(1, len(history) + 1))
     gains = [history[0]] + [history[i] - history[i - 1] for i in range(1, len(history))]
     fig, ax1 = plt.subplots(figsize=(max(10, len(x) * 0.9), 5))
@@ -127,7 +127,7 @@ def plot_bhatta_forward(history, sel_names, out_dir):
 def plot_knn_forward(history, sel_names, out_dir):
     """Кривая Forward Selection по точности kNN."""
     if not history:
-        print("     Нет данных — рисунок 5 пропущен"); return
+        print("     Нет данных - рисунок 5 пропущен"); return
     x = list(range(1, len(history) + 1))
     pct = [v * 100 for v in history]
     gains = [pct[0]] + [pct[i] - pct[i - 1] for i in range(1, len(pct))]
@@ -160,7 +160,7 @@ def plot_knn_forward(history, sel_names, out_dir):
 
 # --------------------------------------------------------------------------- [6]
 def plot_window_frequency(sel_b_names, sel_m_names, out_dir):
-    """Частота выбора признаков по размерам окна — какой масштаб информативнее."""
+    """Частота выбора признаков по размерам окна - какой масштаб информативнее."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     colors = {3: '#3A86FF', 5: '#2A9D8F', 7: '#FF9F1C', 9: '#E63946', None: '#888888'}
     labels = {3: 'Окно 3×3', 5: 'Окно 5×5', 7: 'Окно 7×7', 9: 'Окно 9×9', None: 'Спектральные'}

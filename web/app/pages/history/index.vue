@@ -103,7 +103,7 @@ async function remove(taskId: string) {
               </NuxtLink>
             </td>
             <td>{{ presetNames[it.preset] ?? it.preset }}</td>
-            <td class="num">{{ it.n_pixels?.toLocaleString('ru') ?? '—' }}</td>
+            <td class="num">{{ it.n_pixels?.toLocaleString('ru') ?? '-' }}</td>
             <td class="accs">
               <span
                 v-for="(acc, crit) in it.accuracies"

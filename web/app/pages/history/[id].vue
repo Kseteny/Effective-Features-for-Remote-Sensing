@@ -18,7 +18,7 @@ function label(c: { id: string; name?: string }) {
   return c.name ?? c.id
 }
 
-// Запасные значения цветов — чтобы метка не превратилась
+// Запасные значения цветов - чтобы метка не превратилась
 // в белый текст на прозрачном фоне, если токена в стилях не окажется.
 const CRITERION_HEX: Record<string, string> = {
   forest: '#14664A',
@@ -43,7 +43,7 @@ function tagStyle(c: { color?: string }) {
     </div>
 
     <p v-if="error" class="notice notice--error">
-      Такого расчёта нет — возможно, его удалили из истории.
+      Такого расчёта нет - возможно, его удалили из истории.
     </p>
 
     <div v-else-if="result" class="stack">
@@ -92,7 +92,7 @@ function tagStyle(c: { color?: string }) {
 
       <ClientOnly>
         <div v-for="c in result.criteria" :key="'ch-' + c.id" class="card">
-          <p class="card__title">{{ label(c) }} — по шагам отбора</p>
+          <p class="card__title">{{ label(c) }} - по шагам отбора</p>
           <SelectionChart
             :labels="c.selected_names"
             :values="c.history"

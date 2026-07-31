@@ -1,5 +1,5 @@
 """
-compare.py — сравнение результатов нескольких запусков (по разным seed).
+compare.py - сравнение результатов нескольких запусков (по разным seed).
 
 Назначение:
   Прогнав эксперимент с разными seed (разные случайные наборы патчей),
@@ -12,10 +12,10 @@ compare.py — сравнение результатов нескольких з
   Чем чаще признак попадает в отбор при разных seed, тем он надёжнее.
 
 Результаты сохраняются в папку comparison/:
-    summary.txt              — текстовая сводка с выводами
-    freq_bhattacharyya.png   — частота выбора признаков (Бхаттачарья)
-    freq_knn.png             — частота выбора признаков (kNN)
-    stability_heatmap.png    — тепловая карта: признак × seed
+    summary.txt              - текстовая сводка с выводами
+    freq_bhattacharyya.png   - частота выбора признаков (Бхаттачарья)
+    freq_knn.png             - частота выбора признаков (kNN)
+    stability_heatmap.png    - тепловая карта: признак × seed
 """
 
 import os
@@ -30,7 +30,7 @@ from .features import parse_feature_window
 
 
 def _savefig(path, dpi=150):
-    """Сохранение через буфер — безопасно к перехвату stdout."""
+    """Сохранение через буфер - безопасно к перехвату stdout."""
     import io
     buf = io.BytesIO()
     plt.savefig(buf, dpi=dpi, bbox_inches='tight', format='png')
@@ -42,7 +42,7 @@ def _savefig(path, dpi=150):
 
 def aggregate_runs(runs):
     """
-    runs — список словарей вида:
+    runs - список словарей вида:
        {'seed': int,
         'bhattacharyya': [имена признаков в порядке отбора],
         'knn': [имена признаков в порядке отбора]}
@@ -50,9 +50,9 @@ def aggregate_runs(runs):
     Порядок в списках = порядок Forward Selection (1-й = самый информативный).
 
     Возвращает:
-      freq      — Counter частот по каждому методу
-      per_seed  — {method: {seed: set(features)}}
-      steps     — {method: {feature: [шаг_в_run1, шаг_в_run2, ...]}}
+      freq      - Counter частот по каждому методу
+      per_seed  - {method: {seed: set(features)}}
+      steps     - {method: {feature: [шаг_в_run1, шаг_в_run2, ...]}}
                   шаг = позиция в списке (1 = выбран первым)
     """
     n_runs = len(runs)
@@ -122,7 +122,7 @@ def plot_frequency(freq_counter, n_runs, method_name, out_dir):
     ax.set_ylabel(f'Сколько раз выбран (из {n_runs} запусков)', fontsize=11)
     ax.set_ylim(0, n_runs + 0.5)
     ax.set_yticks(range(n_runs + 1))
-    ax.set_title(f'Частота выбора признаков — {method_name}\n'
+    ax.set_title(f'Частота выбора признаков - {method_name}\n'
                  f'(по {n_runs} запускам с разными seed)',
                  fontsize=13, fontweight='bold')
     ax.grid(True, axis='y', alpha=0.3)
@@ -149,7 +149,7 @@ def plot_frequency(freq_counter, n_runs, method_name, out_dir):
 
 def plot_stability_heatmap(per_seed_method, seeds, all_features, method_name, out_dir):
     """
-    Тепловая карта: строки — признаки, столбцы — seed.
+    Тепловая карта: строки - признаки, столбцы - seed.
     Ячейка закрашена, если признак выбран при данном seed.
     Сразу видно, какие признаки стабильны по всем столбцам.
     """
@@ -177,7 +177,7 @@ def plot_stability_heatmap(per_seed_method, seeds, all_features, method_name, ou
     ax.set_xticklabels([f'seed={s}' for s in seeds], fontsize=9)
     ax.set_yticks(range(len(features_sorted)))
     ax.set_yticklabels(features_sorted, fontsize=9)
-    ax.set_title(f'Устойчивость отбора — {method_name}\n'
+    ax.set_title(f'Устойчивость отбора - {method_name}\n'
                  f'(зелёный = признак выбран при этом seed)',
                  fontsize=12, fontweight='bold')
 
@@ -197,7 +197,7 @@ def _fmt_time(seconds):
     """Время в человекочитаемом виде."""
     from datetime import timedelta
     if seconds is None:
-        return '—'
+        return '-'
     if seconds < 60:
         return f"{seconds:.1f} сек"
     return str(timedelta(seconds=int(seconds)))
@@ -276,20 +276,20 @@ def write_summary(agg, out_dir, series_time=None, per_run_times=None, mode=None)
         periph = [f for f, c in freq.items() if _classify(c, n) == 'периферия']
         noise  = [f for f, c in freq.items() if _classify(c, n) == 'шум']
 
-        lines.append(f"  ЯДРО (выбрано во всех {n} запусках) — {len(core)} шт:")
+        lines.append(f"  ЯДРО (выбрано во всех {n} запусках) - {len(core)} шт:")
         for f in sorted(core, key=lambda x: -freq[x]):
             lines.append(f"     {f:<16s}  {freq[f]}/{n}")
         lines.append("")
-        lines.append(f"  ПЕРИФЕРИЯ (в большинстве запусков) — {len(periph)} шт:")
+        lines.append(f"  ПЕРИФЕРИЯ (в большинстве запусков) - {len(periph)} шт:")
         for f in sorted(periph, key=lambda x: -freq[x]):
             lines.append(f"     {f:<16s}  {freq[f]}/{n}")
         lines.append("")
-        lines.append(f"  ШУМ (редко) — {len(noise)} шт:")
+        lines.append(f"  ШУМ (редко) - {len(noise)} шт:")
         for f in sorted(noise, key=lambda x: -freq[x]):
             lines.append(f"     {f:<16s}  {freq[f]}/{n}")
         lines.append("")
 
-    # Сравнение ядер двух критериев — ТРИ УРОВНЯ согласованности
+    # Сравнение ядер двух критериев - ТРИ УРОВНЯ согласованности
     freq_b = agg['freq']['bhattacharyya']
     freq_k = agg['freq']['knn']
 
@@ -311,21 +311,21 @@ def write_summary(agg, out_dir, series_time=None, per_run_times=None, mode=None)
     lines.append(f"  Ядро Бхаттачарьи (всегда): {sorted(core_b)}")
     lines.append(f"  Ядро kNN (всегда):         {sorted(core_k)}")
     lines.append("")
-    lines.append(f"  [1] СТРОГОЕ согласие — оба выбирают во ВСЕХ {n} запусках ({len(strict)}):")
+    lines.append(f"  [1] СТРОГОЕ согласие - оба выбирают во ВСЕХ {n} запусках ({len(strict)}):")
     lines.append(f"      {sorted(strict)}")
     lines.append("")
-    lines.append(f"  [2] СОГЛАСИЕ БОЛЬШИНСТВА — оба выбирают в >= {int(half)+ (1 if half%1 else 0)}/{n} запусках ({len(majority)}):")
+    lines.append(f"  [2] СОГЛАСИЕ БОЛЬШИНСТВА - оба выбирают в >= {int(half)+ (1 if half%1 else 0)}/{n} запусках ({len(majority)}):")
     lines.append(f"      {sorted(majority)}")
     lines.append("")
-    lines.append(f"  [3] ШИРОКОЕ согласие — выбран обоими хотя бы раз ({len(ever)}):")
+    lines.append(f"  [3] ШИРОКОЕ согласие - выбран обоими хотя бы раз ({len(ever)}):")
     lines.append(f"      {sorted(ever)}")
     lines.append("")
     lines.append("  Интерпретация:")
-    lines.append("    [1] нижняя граница — признаки, надёжные при любой выборке;")
-    lines.append("    [2] практический набор — реальная согласованность методов;")
-    lines.append("    [3] верхняя граница — все совместно отмеченные признаки.")
+    lines.append("    [1] нижняя граница - признаки, надёжные при любой выборке;")
+    lines.append("    [2] практический набор - реальная согласованность методов;")
+    lines.append("    [3] верхняя граница - все совместно отмеченные признаки.")
     lines.append("    Чем больше уровень [2], тем сильнее filter-метод (по формулам)")
-    lines.append("    воспроизводит результат wrapper-метода (kNN) — что подтверждает")
+    lines.append("    воспроизводит результат wrapper-метода (kNN) - что подтверждает")
     lines.append("    возможность отбора признаков без обучения классификатора.")
     lines.append("=" * 70)
 
@@ -338,19 +338,19 @@ def write_summary(agg, out_dir, series_time=None, per_run_times=None, mode=None)
 
 def write_ranking_csv(agg, out_dir, sep=';'):
     """
-    feature_ranking.csv — главная таблица ранжирования признаков.
+    feature_ranking.csv - главная таблица ранжирования признаков.
 
     Колонки:
-      feature        — имя признака
-      group          — окно (3/5/7/9) или 'спектр'
-      bhatta_count   — сколько раз выбран Бхаттачарьей (из N)
-      bhatta_avg_step— средний шаг выбора (1=первым; пусто если не выбран)
-      knn_count      — сколько раз выбран kNN
-      knn_avg_step   — средний шаг выбора kNN
-      category       — ядро / периферия / шум (по макс. из двух частот)
+      feature        - имя признака
+      group          - окно (3/5/7/9) или 'спектр'
+      bhatta_count   - сколько раз выбран Бхаттачарьей (из N)
+      bhatta_avg_step- средний шаг выбора (1=первым; пусто если не выбран)
+      knn_count      - сколько раз выбран kNN
+      knn_avg_step   - средний шаг выбора kNN
+      category       - ядро / периферия / шум (по макс. из двух частот)
 
-    Разделитель ';' — чтобы русский Excel открывал по двойному клику.
-    Десятичная запятая — тоже для русского Excel.
+    Разделитель ';' - чтобы русский Excel открывал по двойному клику.
+    Десятичная запятая - тоже для русского Excel.
     """
     import csv
     n = agg['n_runs']
@@ -383,10 +383,10 @@ def write_ranking_csv(agg, out_dir, sep=';'):
     def _agreement(cb, ck):
         """
         Согласие методов по признаку:
-          'оба'              — оба выбирают часто (>= половины запусков);
-          'только Бхаттач.'  — берёт фильтр, kNN почти нет;
-          'только kNN'       — берёт kNN, фильтр почти нет;
-          'редко'            — оба берут редко.
+          'оба'              - оба выбирают часто (>= половины запусков);
+          'только Бхаттач.'  - берёт фильтр, kNN почти нет;
+          'только kNN'       - берёт kNN, фильтр почти нет;
+          'редко'            - оба берут редко.
         """
         b_often = cb >= half
         k_often = ck >= half
@@ -425,7 +425,7 @@ def write_ranking_csv(agg, out_dir, sep=';'):
 
 def write_per_seed_csv(agg, runs, out_dir, sep=';'):
     """
-    per_seed.csv — что выбрано при каждом seed (сырые данные).
+    per_seed.csv - что выбрано при каждом seed (сырые данные).
     Колонки: seed; method; step; feature
     """
     import csv
@@ -446,10 +446,10 @@ def compare_runs(runs, comparison_dir, series_time=None,
                  per_run_times=None, mode=None):
     """
     Главная функция сравнения.
-    runs — список {'seed', 'bhattacharyya', 'knn'}.
-    series_time   — общее время всей серии (сек), для summary.
-    per_run_times — {seed: время запуска}, для summary.
-    mode          — режим (fast/research/full), для summary.
+    runs - список {'seed', 'bhattacharyya', 'knn'}.
+    series_time   - общее время всей серии (сек), для summary.
+    per_run_times - {seed: время запуска}, для summary.
+    mode          - режим (fast/research/full), для summary.
     Строит графики, CSV-таблицы и сводку в comparison_dir.
     """
     os.makedirs(comparison_dir, exist_ok=True)

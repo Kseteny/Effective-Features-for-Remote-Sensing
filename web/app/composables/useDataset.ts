@@ -9,7 +9,7 @@ import type { DatasetReport } from '~/types/api'
  *
  * Загрузка вызывается только в браузере (onMounted). Иначе сборка
  * статических страниц документации потребовала бы запущенного сервера
- * расчётов — а они с ним никак не связаны.
+ * расчётов - а они с ним никак не связаны.
  */
 export function useDataset() {
   const config = useRuntimeConfig()

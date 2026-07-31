@@ -10,13 +10,13 @@ const { data: presetsData } = await useFetch<{ items: Preset[] }>(`${api}/api/pr
 const { data: criteriaData } = await useFetch<{ items: Criterion[] }>(`${api}/api/criteria`)
 
 // Настройки тоже в useState: иначе при возвращении на страницу
-// результат остался бы на месте, а галочки сбросились — выглядело бы
+// результат остался бы на месте, а галочки сбросились - выглядело бы
 // так, будто расчёт шёл с другими параметрами.
 const preset = useState<string>('run:preset', () => 'thinned')
 const chosen = useState<string[]>('run:criteria', () => ['bhattacharyya', 'mahalanobis'])
 
 // Состояние расчёта вынесено в композабл: так оно переживает переход
-// на другую страницу и возвращение обратно, а если страницу перезагрузили —
+// на другую страницу и возвращение обратно, а если страницу перезагрузили -
 // подхватывается с сервера.
 const {
   status, result, errorText, cancelling,
@@ -35,7 +35,7 @@ function label(c: { id: string; name?: string }) {
   return c.name ?? c.id
 }
 
-// Запасные значения цветов — чтобы метка не превратилась
+// Запасные значения цветов - чтобы метка не превратилась
 // в белый текст на прозрачном фоне, если токена в стилях не окажется.
 const CRITERION_HEX: Record<string, string> = {
   forest: '#14664A',
@@ -56,7 +56,7 @@ function tagStyle(c: { color?: string }) {
     <div class="page__head">
       <h1>Расчёт</h1>
       <p class="page__lead">
-        Выберите объём выборки и критерии — программа отберёт признаки
+        Выберите объём выборки и критерии - программа отберёт признаки
         каждым из них и покажет, где результаты сошлись.
       </p>
     </div>
@@ -117,7 +117,7 @@ function tagStyle(c: { color?: string }) {
         </div>
 
         <div v-if="cancelled" class="notice notice--empty">
-          Расчёт остановлен. Результатов нет — можно поменять параметры
+          Расчёт остановлен. Результатов нет - можно поменять параметры
           и запустить заново.
         </div>
 
@@ -171,7 +171,7 @@ function tagStyle(c: { color?: string }) {
 
           <ClientOnly>
             <div v-for="c in result.criteria" :key="'ch-' + c.id" class="card">
-              <p class="card__title">{{ label(c) }} — по шагам отбора</p>
+              <p class="card__title">{{ label(c) }} - по шагам отбора</p>
               <SelectionChart
                 :labels="c.selected_names"
                 :values="c.history"

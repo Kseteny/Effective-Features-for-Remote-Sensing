@@ -1,11 +1,11 @@
 """
-pipeline.py — главный пайплайн эксперимента.
+pipeline.py - главный пайплайн эксперимента.
 
 Связывает все модули:
-  config     — параметры
-  features   — загрузка данных + 41 признак
-  selectors  — расстояния + Forward Selection (реестр критериев)
-  visualize  — графики
+  config     - параметры
+  features   - загрузка данных + 41 признак
+  selectors  - расстояния + Forward Selection (реестр критериев)
+  visualize  - графики
 
 Точка входа: run(cfg).
 """
@@ -97,7 +97,7 @@ def run(cfg: ExperimentConfig = None):
     timings = {}   # время каждого шага
 
     print("=" * 70)
-    print("  EFFECTIVE-FEATURES — сравнительный анализ методов отбора признаков")
+    print("  EFFECTIVE-FEATURES - сравнительный анализ методов отбора признаков")
     print("=" * 70)
     print(f"  Окна:          {cfg.window_sizes}")
     print(f"  Спектральные:  {'да (9)' if cfg.use_spectral else 'нет'}")
@@ -218,19 +218,19 @@ def run(cfg: ExperimentConfig = None):
     for method_name, r in results_by_method.items():
         print(f"\n  {method_name} ({len(r['names'])}): {r['names']}")
     # Согласованность: что выбрали все критерии сразу и как они
-    # сходятся попарно. Раньше сравнивались ровно два — теперь любое число.
+    # сходятся попарно. Раньше сравнивались ровно два - теперь любое число.
     sets = {m: set(r['names']) for m, r in results_by_method.items() if r['names']}
     if len(sets) >= 2:
         common_all = set.intersection(*sets.values())
         print(f"\n  Совпало у всех критериев ({len(common_all)}): "
-              f"{sorted(common_all) if common_all else '—'}")
+              f"{sorted(common_all) if common_all else '-'}")
         if len(sets) > 2:
             print("  Попарные пересечения:")
             keys = sorted(sets)
             for i, a in enumerate(keys):
                 for b in keys[i + 1:]:
                     both = sets[a] & sets[b]
-                    print(f"    {a} и {b}: {len(both)} — {sorted(both) if both else '—'}")
+                    print(f"    {a} и {b}: {len(both)} - {sorted(both) if both else '-'}")
 
     # --- ЭФФЕКТИВНОСТЬ НАБОРОВ (на контрольной выборке) ---
     print("\n" + "─" * 60 + "\n  ЭФФЕКТИВНОСТЬ НАБОРОВ (контрольная выборка)\n" + "─" * 60)
@@ -248,7 +248,7 @@ def run(cfg: ExperimentConfig = None):
     for stage, sec in timings.items():
         pct = 100 * sec / total if total > 0 else 0
         print(f"  {stage:<22s} {_fmt(sec):>12s}   ({pct:4.1f}%)")
-    # отдельно — сравнение времени критериев (важно для выводов!)
+    # отдельно - сравнение времени критериев (важно для выводов!)
     if all('time' in r for r in results_by_method.values()) and len(results_by_method) >= 2:
         print("\n  Сравнение критериев по времени:")
         for m, r in results_by_method.items():

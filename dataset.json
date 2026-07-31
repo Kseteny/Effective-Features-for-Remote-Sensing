@@ -1,5 +1,5 @@
 {
-  "name": "MultiSenGE — Гранд-Эст, Франция",
+  "name": "MultiSenGE - Гранд-Эст, Франция",
   "images_dir": "data/s2_pref",
   "masks_dir": "data/ground_reference",
   "lists": {
