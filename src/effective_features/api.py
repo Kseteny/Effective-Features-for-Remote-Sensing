@@ -344,16 +344,33 @@ def _run_task(task: Task):
                 'time_sec': round(dt, 2),
             })
 
-        # Согласованность считается, только когда критериев ровно два -
-        # для одного сравнивать не с чем, для трёх и более нужна другая логика.
+        # Согласованность: что выбрали все, что большинство, что только один,
+        # и попарные пересечения. Для одного критерия сравнивать не с чем.
         agreement = None
-        if len(results) == 2:
-            a = set(results[0]['selected_names'])
-            b = set(results[1]['selected_names'])
+        if len(results) >= 2:
+            sets = {r['id']: set(r['selected_names']) for r in results}
+            ids = list(sets)
+            half = len(ids) / 2
+
+            # сколько критериев взяли каждый признак
+            votes = {}
+            for s in sets.values():
+                for f in s:
+                    votes[f] = votes.get(f, 0) + 1
+
             agreement = {
-                'both': sorted(a & b),
-                'only_first': sorted(a - b),
-                'only_second': sorted(b - a),
+                'all': sorted(f for f, v in votes.items() if v == len(ids)),
+                'majority': sorted(f for f, v in votes.items() if v > half),
+                'unique': {
+                    i: sorted(sets[i] - set().union(
+                        *(sets[j] for j in ids if j != i)))
+                    for i in ids
+                },
+                'pairs': [
+                    {'a': a, 'b': b, 'features': sorted(sets[a] & sets[b])}
+                    for n, a in enumerate(ids) for b in ids[n + 1:]
+                ],
+                'n_criteria': len(ids),
             }
 
         task.result = {

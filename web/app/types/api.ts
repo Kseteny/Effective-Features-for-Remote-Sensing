@@ -73,9 +73,11 @@ export interface RunResult {
   }
   criteria: CriterionResult[]
   agreement: {
-    both: string[]
-    only_first: string[]
-    only_second: string[]
+    all: string[]
+    majority: string[]
+    unique: Record<string, string[]>
+    pairs: { a: string; b: string; features: string[] }[]
+    n_criteria: number
   } | null
   total_time_sec: number
 }

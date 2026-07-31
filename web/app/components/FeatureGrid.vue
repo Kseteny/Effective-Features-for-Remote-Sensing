@@ -109,14 +109,17 @@ function cellTitle(name: string) {
   return `${name} - ${by.map(c => c.name).join(', ')}`
 }
 
-/** Сколько признаков выбрали все критерии сразу. */
-const commonCount = computed(() => {
-  if (withColors.value.length < 2) return null
-  let n = 0
+/** Сколько признаков выбрали все критерии, и сколько - большинство. */
+const agreeCounts = computed(() => {
+  const total = withColors.value.length
+  if (total < 2) return null
+  let all = 0
+  let majority = 0
   for (const by of picks.value.values()) {
-    if (by.length === withColors.value.length) n++
+    if (by.length === total) all++
+    if (by.length > total / 2) majority++
   }
-  return n
+  return { all, majority }
 })
 </script>
 
@@ -151,10 +154,12 @@ const commonCount = computed(() => {
       </span>
     </div>
 
-    <p v-if="commonCount !== null" class="summary">
+    <p v-if="agreeCounts" class="summary">
       Выбрали все критерии сразу:
-      <span class="num">{{ commonCount }}</span> из
-      <span class="num">{{ allFeatures.length }}</span>
+      <span class="num">{{ agreeCounts.all }}</span> из
+      <span class="num">{{ allFeatures.length }}</span>,
+      большинством -
+      <span class="num">{{ agreeCounts.majority }}</span>
     </p>
   </div>
 </template>

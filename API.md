@@ -242,9 +242,13 @@
     }
   ],
   "agreement": {
-    "strict": ["Norm_B12", "Norm_B4"],
-    "majority": ["Mean_3", "Mean_7", "NDBI"],
-    "by_criterion": { "bhattacharyya": ["Mean_5"], "knn": ["Norm_B2"] }
+    "all": ["Norm_B11", "Norm_B4"],
+    "majority": ["Mean_3", "Mean_7", "NDBI", "NDVI", "NDWI", "Norm_B12"],
+    "unique": { "mahalanobis": ["Rho_90_9"], "knn": [] },
+    "pairs": [
+      { "a": "bhattacharyya", "b": "mahalanobis", "features": ["Mean_3", "NDVI"] }
+    ],
+    "n_criteria": 4
   },
   "distances": {
     "class_ids": [1, 2, 3],
@@ -254,6 +258,10 @@
   "total_time_sec": 139.0
 }
 ```
+
+`agreement` приходит, когда критериев два и больше: `all` - признаки,
+которые выбрали все критерии, `majority` - больше половины, `unique` -
+что взял только один критерий, `pairs` - попарные пересечения наборов.
 
 `history` - значения критерия после добавления каждого очередного
 признака; по ним рисуется кривая прироста. Единица измерения у каждого

@@ -83,11 +83,6 @@ function tagStyle(c: { color?: string }) {
           :all-features="result.dataset.feature_names"
           :criteria="result.criteria"
         />
-        <p v-if="result.agreement" class="muted agree">
-          Совпало у обоих критериев:
-          <span class="num">{{ result.agreement.both.length }}</span> из
-          <span class="num">{{ result.dataset.n_features }}</span>
-        </p>
       </div>
 
       <ClientOnly>
@@ -118,5 +113,4 @@ function tagStyle(c: { color?: string }) {
 .back:hover { color: var(--forest); }
 .id { font-size: 1.2rem; color: var(--ink-faint); font-weight: 400; }
 .meta { margin: 0 0 1rem; font-size: 0.9rem; }
-.agree { margin: 1.25rem 0 0; font-size: 0.9rem; }
 </style>
