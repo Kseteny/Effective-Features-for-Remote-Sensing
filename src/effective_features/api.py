@@ -27,9 +27,10 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import storage, dataset, criteria as crit
+from . import storage, dataset, criteria as crit, feature_sets as fsets
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube
 from .selectors import evaluate_feature_set, Cancelled
@@ -124,6 +125,13 @@ def get_features():
         'textural': sum(1 for i in items if i['group'] == 'textural'),
         'items': items,
     }
+
+
+@app.get("/api/feature-sets")
+def get_feature_sets():
+    """Наборы признаков: встроенные и добавленные исследователем."""
+    fsets.load_user_sets(_project_root())
+    return {'items': [fsets.describe(f) for f in fsets.all_sets()]}
 
 
 @app.get("/api/criteria")
@@ -553,3 +561,76 @@ def health():
     with TASKS_LOCK:
         active = sum(1 for t in TASKS.values() if t.status in ('queued', 'running'))
     return {'status': 'ok', 'tasks_total': len(TASKS), 'tasks_active': active}
+
+
+# ===========================================================================
+# РАЗДАЧА ИНТЕРФЕЙСА
+#
+# Чтобы пользователю не приходилось запускать два сервера, собранный
+# интерфейс отдаётся этим же приложением. Тогда весь инструмент —
+# это один процесс и один адрес.
+#
+# Этот обработчик должен быть объявлен последним: он ловит все адреса,
+# и если поставить его выше, он перехватил бы запросы к /api.
+# ===========================================================================
+WEB_DIR = os.path.join(_project_root(), 'web', '.output', 'public')
+
+NO_UI_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Интерфейс не собран</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:640px;margin:8vh auto;padding:0 1.5rem;
+      line-height:1.6;color:#17211C;background:#ECF1EA}
+ code{background:#E4EBE3;padding:.15em .4em;border-radius:4px;
+      font-family:ui-monospace,monospace;font-size:.9em}
+ pre{background:#fff;border:1px solid #D3DCD3;padding:1rem;border-radius:8px;overflow-x:auto}
+ a{color:#14664A}
+</style></head><body>
+<h1>Интерфейс не собран</h1>
+<p>Сам расчётный сервер работает — можно посмотреть
+<a href="/docs">список запросов</a>. А вот собранных страниц ещё нет.</p>
+<p>Чтобы их собрать, выполните из папки <code>web</code>:</p>
+<pre>npm install
+npm run generate</pre>
+<p>После этого обновите страницу.</p>
+</body></html>"""
+
+
+def _safe_path(rel: str):
+    """Путь внутри папки с интерфейсом. None, если запрос пытается
+    выбраться наружу — например, через «..» в адресе."""
+    candidate = os.path.normpath(os.path.join(WEB_DIR, rel))
+    root = os.path.normpath(WEB_DIR)
+    if candidate != root and not candidate.startswith(root + os.sep):
+        return None
+    return candidate
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def serve_frontend(path: str):
+    """Отдаёт собранный интерфейс.
+
+    Порядок такой: сначала ищем файл, потом index.html внутри папки,
+    и в последнюю очередь — заглушку одностраничного приложения.
+    Последнее нужно для страниц, которые собираются в браузере:
+    на диске их нет, но открываться по прямой ссылке они должны.
+    """
+    if not os.path.isdir(WEB_DIR):
+        return HTMLResponse(NO_UI_PAGE, status_code=200)
+
+    target = _safe_path(path)
+    if target is None:
+        raise HTTPException(404, "Не найдено")
+
+    if os.path.isfile(target):
+        return FileResponse(target)
+
+    index = os.path.join(target, 'index.html')
+    if os.path.isfile(index):
+        return FileResponse(index)
+
+    fallback = os.path.join(WEB_DIR, '200.html')
+    if os.path.isfile(fallback):
+        return FileResponse(fallback)
+
+    raise HTTPException(404, "Страница не найдена")

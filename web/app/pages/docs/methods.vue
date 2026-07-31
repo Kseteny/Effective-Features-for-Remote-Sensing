@@ -99,6 +99,39 @@ useHead({ title: 'Методы отбора' })
       число: расстояние D_B или D_M, оно видно на графике отбора.
     </p>
 
+    <h2>Как добавить свои признаки</h2>
+    <p>
+      Признаки собраны в наборы: спектральные, текстурные и те, что добавил
+      сам исследователь. Чтобы добавить свой, не нужно трогать код программы —
+      достаточно положить файл в папку <code>user_features</code> рядом
+      с папками <code>src</code> и <code>data</code>:
+    </p>
+    <pre class="code">import numpy as np
+from effective_features.feature_sets import register
+
+def compute(ctx):
+    gy, gx = np.gradient(ctx.gray)
+    return {'Gradient': np.hypot(gx, gy).astype(np.float32)}
+
+register(
+    id='gradient',
+    name='Модуль градиента',
+    description='Резкость переходов яркости',
+    compute=compute,
+)</pre>
+    <p>
+      Функция получает контекст и возвращает словарь: имя признака →
+      массив той же формы, что и снимок. В контексте есть
+      <code>ctx.gray</code> — яркость, <code>ctx.image</code> — все каналы,
+      <code>ctx.band('nir')</code> — канал по роли,
+      <code>ctx.window_sizes</code> — размеры окон из настроек.
+    </p>
+    <p class="prose__note">
+      Новые признаки добавляются в конец списка, поэтому номера встроенных
+      не сдвигаются. Ошибка в пользовательском наборе не роняет расчёт:
+      программа сообщает о ней и продолжает работу без этого набора.
+    </p>
+
     <h2>Как добавить свой критерий</h2>
     <p>
       Список критериев собран в одном месте — файле
@@ -110,6 +143,18 @@ useHead({ title: 'Методы отбора' })
 </template>
 
 <style scoped>
+.code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  background: var(--surface-sunk);
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--r-md);
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0 0 1rem;
+}
+
 code {
   font-family: var(--font-mono);
   font-size: 0.88em;

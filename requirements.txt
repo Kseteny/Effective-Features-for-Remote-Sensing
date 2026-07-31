@@ -1,7 +1,17 @@
+# Расчёты
 numpy
-opencv-python
-matplotlib
-rasterio
 scipy
-scikit-image
+pandas
 scikit-learn
+
+# Чтение снимков
+rasterio
+
+# Графики (командная строка)
+matplotlib
+seaborn      # если графики командной строки не нужны, можно убрать
+
+# Веб-сервер
+fastapi
+uvicorn
+pydantic

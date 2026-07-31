@@ -3,6 +3,11 @@ useHead({ title: 'Данные' })
 
 const { report, failed, loading, load } = useDataset()
 
+const config = useRuntimeConfig()
+const { data: setsData } = await useFetch<{
+  items: { id: string; name: string; description: string; builtin: boolean }[]
+}>(`${config.public.apiBase}/api/feature-sets`)
+
 onMounted(() => load(true))
 
 const info = computed(() => (report.value?.ok ? report.value.dataset : null))
@@ -112,6 +117,24 @@ function usedInFeatures(band: string): boolean {
         </ul>
       </div>
 
+      <div v-if="setsData?.items?.length" class="card">
+        <p class="card__title">Наборы признаков</p>
+        <p class="muted note">
+          Свой набор можно добавить, не трогая код программы: положите файл
+          в папку <code>user_features</code> рядом с проектом. Как —
+          написано на странице <NuxtLink to="/docs/methods">«Методы»</NuxtLink>.
+        </p>
+        <div class="sets">
+          <div v-for="s in setsData.items" :key="s.id" class="set">
+            <div class="set__head">
+              <span class="set__name">{{ s.name }}</span>
+              <span v-if="!s.builtin" class="set__badge">свой</span>
+            </div>
+            <div class="set__desc">{{ s.description }}</div>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <p class="card__title">Классы</p>
         <p v-if="!info.classes.length" class="muted">
@@ -185,6 +208,30 @@ code {
 
 .missing { margin: 0.8rem 0 0; padding-left: 1.1rem; color: var(--ink-soft); font-size: 0.9rem; }
 .missing li { margin: 0.3rem 0; }
+
+.sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.8rem; }
+
+.set {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 0.7rem 0.85rem;
+}
+
+.set__head { display: flex; align-items: center; gap: 0.5rem; }
+.set__name { font-weight: 500; font-size: 0.92rem; }
+
+.set__badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--forest, #14664A);
+  color: #fff;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--r-sm);
+}
+
+.set__desc { font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.3rem; line-height: 1.45; }
 
 .classes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.35rem 1.5rem; }
 .class-row { display: flex; gap: 0.7rem; font-size: 0.9rem; }

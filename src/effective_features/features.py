@@ -111,41 +111,58 @@ def compute_spectral_features(image, spec):
 
 def extract_all_features(image, cfg: ExperimentConfig):
     """
-    Полное базовое признаковое пространство (41 признак при дефолтном cfg).
+    Собирает признаки из наборов, указанных в настройках.
 
-      Спектральные (9, если cfg.use_spectral)
-      Текстурные   (8 × len(cfg.window_sizes))
+    Раньше состав был прописан прямо здесь. Теперь наборы лежат в реестре
+    (feature_sets.py), и исследователь может добавить свой, не трогая
+    этот код: достаточно положить файл в папку user_features.
     """
-    fs = {}
+    from . import feature_sets as fsets
 
-    if cfg.use_spectral and image.ndim == 3:
-        spec = cfg.spec
-        band_names = spec.bands_for_features()
-        n_idx = len(spec.available_indices())
-        print(f"    Спектральные признаки ({len(band_names)} нормализованных"
-              f"{f' + {n_idx} индекса' if n_idx else ''})...")
-        fs.update(compute_spectral_features(image, spec))
+    fsets.load_user_sets(cfg.project_root)
 
-        # Яркость для текстуры — среднее по тем же каналам, что идут в признаки
-        idx = [spec.band_order.index(b) for b in band_names]
+    spec = cfg.spec if image.ndim == 3 else None
+
+    # Яркость для текстурных признаков — среднее по тем каналам,
+    # что идут в признаки. Если описания нет, берём все.
+    if spec is not None and cfg.use_spectral:
+        idx = [spec.band_order.index(b) for b in spec.bands_for_features()]
         gray = np.mean(np.stack([image[i] for i in idx], axis=0),
                        axis=0).astype(np.float32)
     else:
         gray = (np.mean(image, axis=0) if image.ndim == 3 else image).astype(np.float32)
 
-    for w in cfg.window_sizes:
-        print(f"    Текстурные признаки (окно {w}×{w})...")
-        mean, var = get_fast_stats(gray, w)
-        fs[f'Mean_{w}'] = mean.astype(np.float32)
-        fs[f'Var_{w}']  = var.astype(np.float32)
+    ctx = fsets.FeatureContext(
+        image=image, gray=gray, spec=spec,
+        window_sizes=tuple(cfg.window_sizes),
+    )
 
-        rhos = calc_directional_rho(gray, mean, var, w)
-        fs[f'Rho_Avg_{w}']   = ((rhos['0'] + rhos['90'] + rhos['45'] + rhos['135']) / 4
-                                 ).astype(np.float32)
-        fs[f'Rho_Range_{w}'] = (np.maximum.reduce(list(rhos.values())) -
-                                np.minimum.reduce(list(rhos.values()))).astype(np.float32)
-        for a in ('0', '90', '45', '135'):
-            fs[f'Rho_{a}_{w}'] = rhos[a].astype(np.float32)
+    fs = {}
+    for set_id in cfg.active_feature_sets():
+        fset = fsets.get(set_id)
+        if fset is None:
+            print(f"    Набор «{set_id}» не найден — пропускаю")
+            continue
+        if not fset.is_available(ctx):
+            print(f"    Набор «{fset.name}» пропущен: нужен многоканальный снимок")
+            continue
+
+        try:
+            produced = fset.compute(ctx)
+        except Exception as e:
+            # Ошибка в пользовательском наборе не должна ронять весь расчёт
+            print(f"    Набор «{fset.name}» не посчитался: {type(e).__name__}: {e}")
+            continue
+
+        clash = set(produced) & set(fs)
+        if clash:
+            print(f"    Набор «{fset.name}»: имена уже заняты, пропускаю их — "
+                  f"{', '.join(sorted(clash))}")
+            produced = {k: v for k, v in produced.items() if k not in clash}
+
+        print(f"    {fset.name}: {len(produced)} признаков")
+        fs.update(produced)
+
     return fs
 
 

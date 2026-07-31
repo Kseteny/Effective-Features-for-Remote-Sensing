@@ -9,7 +9,7 @@ import os
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import matplotlib.pyplot as plt
 
@@ -105,6 +105,12 @@ class ExperimentConfig:
     #   и кеш ОБНОВЛЯЕТСЯ (если save_cache=True). Нужно при смене формул.
     cache_dir: Optional[str] = None   # папка кеша (по умолч. <root>/cache)
 
+    # --- Наборы признаков ---
+    feature_sets: Optional[List[str]] = None
+    # Какие наборы считать. None → все зарегистрированные, включая
+    # пользовательские из папки user_features. Список наборов —
+    # в feature_sets.py.
+
     # --- Описание датасета ---
     dataset_json: Optional[str] = None
     # Путь к dataset.json. None → ищем в корне проекта. Оттуда берутся
@@ -173,6 +179,29 @@ class ExperimentConfig:
             self._spec = load_spec(self.dataset_json)
         return self._spec
 
+    def active_feature_sets(self):
+        """Список наборов признаков для расчёта.
+
+        Если в настройках ничего не указано — берутся все, какие есть,
+        включая пользовательские. Порядок фиксирован: сначала спектральные,
+        потом текстурные, потом добавленные исследователем — чтобы номера
+        признаков не прыгали от запуска к запуску.
+        """
+        from .feature_sets import REGISTRY, load_user_sets
+        load_user_sets(self.project_root)
+
+        if self.feature_sets is not None:
+            return [s for s in self.feature_sets if s in REGISTRY]
+
+        builtin = [s.id for s in REGISTRY.values() if s.builtin]
+        custom = sorted(s.id for s in REGISTRY.values() if not s.builtin)
+        active = builtin + custom
+
+        # Спектральные признаки можно выключить старой настройкой
+        if not self.use_spectral:
+            active = [s for s in active if s != 'spectral']
+        return active
+
     def class_names(self):
         """Названия классов: из описания датасета, иначе встроенные."""
         try:
@@ -197,17 +226,21 @@ class ExperimentConfig:
         mode = 'spec' if self.use_spectral else 'nospec'
         key = f"w{windows}_{mode}"
 
-        if self.use_spectral:
-            try:
-                bands = self.spec.bands_for_features()
-                indices = self.spec.available_indices()
-                fingerprint = ','.join(bands) + '|' + ','.join(indices)
-                short = hashlib.md5(fingerprint.encode()).hexdigest()[:6]
-                key += f"_{short}"
-            except Exception:
-                # Описание не прочиталось — ключ без отпечатка.
-                # Хуже, чем с ним, но лучше, чем падение на ровном месте.
-                pass
+        # В отпечаток входят и каналы, и состав наборов признаков.
+        # Иначе после добавления своего набора подхватился бы старый кеш,
+        # где этих признаков нет, — и расчёт молча пошёл бы не на тех данных.
+        try:
+            parts = []
+            if self.use_spectral:
+                parts.append(','.join(self.spec.bands_for_features()))
+                parts.append(','.join(self.spec.available_indices()))
+            parts.append(','.join(sorted(self.active_feature_sets())))
+            short = hashlib.md5('|'.join(parts).encode()).hexdigest()[:6]
+            key += f"_{short}"
+        except Exception:
+            # Описание не прочиталось — ключ без отпечатка.
+            # Хуже, чем с ним, но лучше, чем падение на ровном месте.
+            pass
         return key
 
 
