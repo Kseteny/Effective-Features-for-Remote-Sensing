@@ -1,17 +1,14 @@
 """
 api.py - веб-сервис поверх расчётного ядра.
 
-Запуск и получение результата разделены:
-  POST /api/runs        → ставим задачу в фон, сразу отдаём task_id
-  GET  /api/runs/{id}   → браузер опрашивает статус
+Расчёт идёт минутами, а обычный HTTP-запрос столько не живёт, поэтому
+запуск и получение результата разделены:
+  POST /api/runs             → ставим задачу в фон, сразу отдаём task_id
+  GET  /api/runs/{id}        → браузер опрашивает статус
   GET  /api/runs/{id}/result → забирает результат, когда всё посчиталось
-
+Полное описание запросов - в API.md, автоматическая схема - на /api/docs.
 Запуск:
-    pip install fastapi uvicorn
     uvicorn effective_features.api:app --reload
-
-Документация появится сама на http://localhost:8000/docs - FastAPI генерирует
-её из типов.
 """
 import os
 import sys
@@ -44,7 +41,9 @@ async def lifespan(app: FastAPI):
 
 REGISTRY_IDS = tuple(crit.REGISTRY.keys())
 
-app = FastAPI(title="Effective Features API", version="1.2", lifespan=lifespan)
+# docs_url переносим с /docs: этот адрес занят страницей интерфейса
+app = FastAPI(title="Effective Features API", version="1.2",
+              docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
 
 # Разрешаем фронтенду (он крутится на другом порту) обращаться к нам.
 # В продакшене список адресов надо сузить до реального домена.

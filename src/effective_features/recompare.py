@@ -1,19 +1,14 @@
 """
-recompare.py - пересобрать сравнение из УЖЕ посчитанных папок,
-не запуская эксперимент заново.
+recompare.py - пересобрать сравнение из уже посчитанных папок, не запуская эксперимент заново.
 
 Читает results.txt из папок results/<mode>_seed<N>/, вытаскивает
-отобранные признаки (Бхаттачарья и kNN) и строит сводное сравнение
+отобранные признаки по всем критериям и строит сводное сравнение
 в results/<mode>_comparison/ - за секунды, без пересчёта.
-
 Запуск из папки src/:
-
   1) Конкретные сиды:
         python -m effective_features.recompare research 8 21 277 490 595
-
   2) Все найденные папки режима (автоопределение сидов):
         python -m effective_features.recompare research
-
   3) Интерактивно:
         python -m effective_features.recompare
 """
@@ -23,30 +18,27 @@ import re
 import sys
 import glob
 
-from effective_features.config import ExperimentConfig
+from effective_features import criteria as crit
 from effective_features.compare import compare_runs
 
 
 def _parse_results_txt(path):
     """
-    Достаёт из results.txt списки признаков, отобранных каждым методом.
+    Достаёт из results.txt списки признаков по каждому критерию.
     Ищет строки вида:
         bhattacharyya (15): ['Mean_9', 'NDVI', ...]
-        knn (9): ['Norm_B4', ...]
-    Возвращает {'bhattacharyya': [...], 'knn': [...]}.
+
+    Возвращает {id критерия: [признаки]} - только то, что нашлось.
     """
     with open(path, encoding='utf-8') as f:
         text = f.read()
 
-    result = {'bhattacharyya': [], 'knn': []}
-    for method in ('bhattacharyya', 'knn'):
-        # method (N): [ ... ]
-        m = re.search(rf"{method}\s*\(\d+\):\s*\[(.*?)\]", text)
+    result = {}
+    for c in crit.all_criteria():
+        m = re.search(rf"{c.id}\s*\(\d+\):\s*\[(.*?)\]", text)
         if m:
-            inside = m.group(1)
             # выдёргиваем имена в кавычках
-            feats = re.findall(r"'([^']+)'", inside)
-            result[method] = feats
+            result[c.id] = re.findall(r"'([^']+)'", m.group(1))
     return result
 
 
@@ -92,13 +84,9 @@ def recompare(mode, seeds=None):
     for seed in seeds:
         path = os.path.join(all_folders[seed], 'results.txt')
         parsed = _parse_results_txt(path)
-        runs.append({
-            'seed': seed,
-            'bhattacharyya': parsed['bhattacharyya'],
-            'knn': parsed['knn'],
-        })
-        print(f"    seed={seed}: Бхаттачарья {len(parsed['bhattacharyya'])}, "
-              f"kNN {len(parsed['knn'])} признаков")
+        runs.append({'seed': seed, 'selected': parsed, 'evals': {}})
+        found = ', '.join(f"{m} {len(v)}" for m, v in parsed.items()) or 'ничего'
+        print(f"    seed={seed}: {found}")
 
     comparison_dir = os.path.join(project_root, 'results', f'{mode}_comparison')
     print(f"\n  Сравнение → results/{mode}_comparison/")

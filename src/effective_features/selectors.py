@@ -1,13 +1,8 @@
 """
-selectors.py - методы отбора признаков и расстояния между классами.
+selectors.py - сами алгоритмы отбора и оценка набора на контроле.
 
-Реализованы два семейства критериев:
-  * filter  (по формулам, без обучения) - расстояния Махаланобиса и Бхаттачарьи
-  * wrapper (на основе классификатора)  - kNN с кросс-валидацией
-
-РЕЕСТР КРИТЕРИЕВ (SELECTOR_REGISTRY) позволяет добавлять новые методы отбора,
-не меняя пайплайн: достаточно написать функцию и зарегистрировать её.
-Это и есть «полигон» для сравнения методов отбора.
+Каждая функция forward_selection_* возвращает (индексы признаков, история).
+Список критериев собран в criteria.py.
 """
 
 import warnings
@@ -590,58 +585,3 @@ def evaluate_feature_set(dataset, mask, feature_indices, cfg: ExperimentConfig,
         'n_train': len(y_tr),
         'n_test': len(y_te),
     }
-
-# Чтобы добавить новый критерий отбора:
-#   1. написать функцию forward_selection_X(dataset, mask, cfg, ...) →
-#      возвращает (selected_indices, history)
-#   2. добавить её сюда строкой 'имя': {'func': ..., 'kind': 'filter'|'wrapper'}
-# Пайплайн сам подхватит новый критерий.
-# Старый реестр оставлен для совместимости: он собирается из общего
-# (criteria.py), чтобы список критериев был в одном месте. Импорт внутри
-# функции - иначе получится круговая зависимость, ведь criteria.py импортирует функции отбора отсюда.
-def _build_legacy_registry():
-    from .criteria import REGISTRY
-    return {
-        c.id: {
-            'func': c.select,
-            'kind': c.type,
-            'needs_target_classes': True,
-            'metric_name': c.unit,
-        }
-        for c in REGISTRY.values()
-    }
-
-
-class _LazyRegistry(dict):
-    """Ведёт себя как словарь, но наполняется при первом обращении."""
-
-    def _fill(self):
-        if not super().__len__():
-            self.update(_build_legacy_registry())
-
-    def items(self):
-        self._fill()
-        return super().items()
-
-    def keys(self):
-        self._fill()
-        return super().keys()
-
-    def values(self):
-        self._fill()
-        return super().values()
-
-    def __getitem__(self, k):
-        self._fill()
-        return super().__getitem__(k)
-
-    def __iter__(self):
-        self._fill()
-        return super().__iter__()
-
-    def __len__(self):
-        self._fill()
-        return super().__len__()
-
-
-SELECTOR_REGISTRY = _LazyRegistry()

@@ -1,11 +1,5 @@
 """
-pipeline.py - главный пайплайн эксперимента.
-
-Связывает все модули:
-  config     - параметры
-  features   - загрузка данных + 41 признак
-  selectors  - расстояния + Forward Selection (реестр критериев)
-  visualize  - графики
+pipeline.py - полный прогон эксперимента: данные → признаки → отбор → рисунки.
 
 Точка входа: run(cfg).
 """
@@ -19,9 +13,10 @@ import numpy as np
 from .config import ExperimentConfig, CLASS_NAMES
 from .features import load_all_data, subsample_dataset, rebuild_feature_cube, parse_feature_window
 from .selectors import (
-    calculate_class_stats, compute_all_pairwise_distances, SELECTOR_REGISTRY,
+    calculate_class_stats, compute_all_pairwise_distances,
     evaluate_feature_set,
 )
+from . import criteria as crit
 from . import visualize as viz
 
 
@@ -161,29 +156,30 @@ def run(cfg: ExperimentConfig = None):
         cfg.bhatta_pair = (int(unique_cls[0]), int(unique_cls[1]))
         print(f"  Пара {pair} недоступна, взята {cfg.bhatta_pair}")
 
+    all_criteria = crit.all_criteria()
     results_by_method = {}
-    for method_name, spec in SELECTOR_REGISTRY.items():
-        print(f"\n  >>> Критерий: {method_name} ({spec['kind']})")
+    for c in all_criteria:
+        print(f"\n  >>> Критерий: {c.id} ({c.type})")
         _tm = time.perf_counter()
-        # Все критерии из реестра принимают одинаковые аргументы,
-        # даже если конкретному критерию список классов не нужен
-        sel, hist = spec['func'](dataset, mask, cfg,
-                                 target_classes=[int(c) for c in unique_cls])
+        # Все критерии принимают одинаковые аргументы, даже если
+        # конкретному критерию список классов не нужен
+        sel, hist = c.select(dataset, mask, cfg,
+                             target_classes=[int(x) for x in unique_cls])
         elapsed = time.perf_counter() - _tm
         sel_names = [names[i] for i in sel]
 
         # Оценка эффективности набора на контрольной выборке
         eval_res = evaluate_feature_set(
             dataset, mask, sel, cfg,
-            target_classes=[int(c) for c in unique_cls])
+            target_classes=[int(x) for x in unique_cls])
 
-        results_by_method[method_name] = {
+        results_by_method[c.id] = {
             'indices': sel, 'history': hist, 'names': sel_names,
-            'kind': spec['kind'], 'metric': spec['metric_name'],
+            'kind': c.type, 'metric': c.unit,
             'time': elapsed, 'eval': eval_res,
         }
-        print(f"  {method_name}: {sel_names}")
-        print(f"    {method_name}: {_fmt(elapsed)}")
+        print(f"  {c.id}: {sel_names}")
+        print(f"    {c.id}: {_fmt(elapsed)}")
         if eval_res:
             print(f"  Эффективность набора ({eval_res['n_features']} призн.): "
                   f"точность {eval_res['accuracy']*100:.1f}%, "
@@ -195,18 +191,16 @@ def run(cfg: ExperimentConfig = None):
     # --- ШАГ 5: Графики ---
     print("\n" + "─" * 60 + "\nШАГ 5: Построение рисунков\n" + "─" * 60)
     _t = time.perf_counter()
-    sel_b_names = results_by_method.get('bhattacharyya', {}).get('names', [])
-    sel_m_names = results_by_method.get('knn', {}).get('names', [])
-    hist_b = results_by_method.get('bhattacharyya', {}).get('history', [])
-    hist_m = results_by_method.get('knn', {}).get('history', [])
+    selected = {m: r['names'] for m, r in results_by_method.items()}
 
     viz.plot_feature_correlation(dataset, mask, names, cfg.output_dir)
     viz.plot_bhatta_heatmap(df_bhatt, cfg.output_dir)
     viz.plot_maha_heatmap(df_maha, cfg.output_dir)
-    viz.plot_bhatta_forward(hist_b, sel_b_names, cfg.output_dir)
-    viz.plot_knn_forward(hist_m, sel_m_names, cfg.output_dir)
-    viz.plot_window_frequency(sel_b_names, sel_m_names, cfg.output_dir)
-    viz.plot_criteria_agreement(sel_b_names, sel_m_names, names, cfg.output_dir)
+    for c in all_criteria:
+        viz.plot_forward(results_by_method[c.id]['history'],
+                         selected[c.id], c, cfg.output_dir)
+    viz.plot_window_frequency(selected, all_criteria, cfg.output_dir)
+    viz.plot_criteria_agreement(selected, all_criteria, names, cfg.output_dir)
     timings['Построение графиков'] = time.perf_counter() - _t
 
     # --- ИТОГ ---

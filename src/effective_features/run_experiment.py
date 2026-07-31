@@ -3,11 +3,9 @@ run_experiment.py - единая точка запуска.
 
 Из папки src/:
     python -m effective_features.run_experiment
-
 Меню предложит выбрать:
     - одиночный запуск (один seed)
     - серию запусков (несколько seed) с автоматическим сравнением
-
 Можно и сразу аргументами, без меню:
     python -m effective_features.run_experiment fast            # один прогон, seed=42
     python -m effective_features.run_experiment fast 7          # один прогон, seed=7
@@ -116,13 +114,11 @@ def _batch_run(mode, seeds):
         cfg = replace(PRESETS[mode], random_seed=seed, run_tag=tag)
         res = run(cfg)
         per_run_times[seed] = time.perf_counter() - _t
+        # Берём все критерии, которые отработали в этом прогоне
         runs.append({
             'seed': seed,
-            'bhattacharyya': res['results'].get('bhattacharyya', {}).get('names', []),
-            'knn': res['results'].get('knn', {}).get('names', []),
-            # эффективность набора каждого метода (для сводки по серии)
-            'eval_bhattacharyya': res['results'].get('bhattacharyya', {}).get('eval'),
-            'eval_knn': res['results'].get('knn', {}).get('eval'),
+            'selected': {m: r.get('names', []) for m, r in res['results'].items()},
+            'evals': {m: r.get('eval') for m, r in res['results'].items()},
         })
         if project_root is None:
             project_root = cfg.project_root
