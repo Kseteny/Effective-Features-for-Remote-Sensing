@@ -6,7 +6,9 @@ api.py - веб-сервис поверх расчётного ядра.
   POST /api/runs             → ставим задачу в фон, сразу отдаём task_id
   GET  /api/runs/{id}        → браузер опрашивает статус
   GET  /api/runs/{id}/result → забирает результат, когда всё посчиталось
+
 Полное описание запросов - в API.md, автоматическая схема - на /api/docs.
+
 Запуск:
     uvicorn effective_features.api:app --reload
 """
@@ -78,14 +80,12 @@ SPECTRAL_FEATURES = [
 ]
 
 PRESETS = {
-    'fast':     {'name': 'Быстрый',           'description': '10 патчей, для проверки',
-                 'cfg': lambda: ExperimentConfig(n_patches=10, max_pixels_total=120_000)},
-    'research': {'name': 'Исследовательский', 'description': '50 патчей',
-                 'cfg': lambda: ExperimentConfig(n_patches=50)},
-    'thinned':  {'name': 'Прореживание',      'description': '~150 патчей, все классы гарантированно',
-                 'cfg': lambda: ExperimentConfig(use_thinning=True, thinning_target_patches=150)},
-    'full':     {'name': 'Полный',            'description': 'весь датасет, считается долго',
-                 'cfg': lambda: ExperimentConfig()},
+    'fast':    {'name': 'Отладочный', 'description': '10 патчей, быстрая проверка',
+                'cfg': lambda: ExperimentConfig(use_thinning=True,
+                                                thinning_target_patches=10,
+                                                max_pixels_total=120_000)},
+    'thinned': {'name': 'Основной', 'description': '~150 патчей, все классы гарантированно',
+                'cfg': lambda: ExperimentConfig(use_thinning=True, thinning_target_patches=150)},
 }
 
 def build_feature_list(window_sizes=(3, 5, 7, 9), use_spectral=True):
@@ -165,7 +165,7 @@ def get_dataset():
 
 
 class RunRequest(BaseModel):
-    preset: str = Field(..., description="fast | research | thinned | full")
+    preset: str = Field(..., description="fast | thinned")
     criteria: List[str] = Field(default_factory=lambda: list(crit.DEFAULT_SELECTION))
     max_features: Optional[int] = Field(default=None, ge=1, le=41)
     bhatta_pair: Optional[List[int]] = Field(default=None, min_length=2, max_length=2)

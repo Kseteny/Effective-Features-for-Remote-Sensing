@@ -105,9 +105,9 @@ class ExperimentConfig:
     output_dir: Optional[str] = None
     results_dir: Optional[str] = None
     run_tag: Optional[str] = None
-    # run_tag - метка запуска. Если задана (например 'seed7'), результаты
-    # кладутся в отдельную папку results/<run_tag>/, графики туда же.
-    # Нужно для серии запусков с разными seed (модуль compare).
+    # run_tag - метка запуска. Если задана, результаты кладутся
+    # в отдельную папку results/<run_tag>/, графики туда же.
+    # Удобно, когда хочется сохранить прогон и не затереть предыдущий.
 
     def resolve_paths(self, base_file: str):
         """

@@ -2,184 +2,62 @@
 run_experiment.py - единая точка запуска.
 
 Из папки src/:
-    python -m effective_features.run_experiment
-Меню предложит выбрать:
-    - одиночный запуск (один seed)
-    - серию запусков (несколько seed) с автоматическим сравнением
-Можно и сразу аргументами, без меню:
-    python -m effective_features.run_experiment fast            # один прогон, seed=42
-    python -m effective_features.run_experiment fast 7          # один прогон, seed=7
-    python -m effective_features.run_experiment research 1 2 3  # серия (2+ seed → батч)
+    python -m effective_features.run_experiment          # спросит режим
+    python -m effective_features.run_experiment fast     # сразу отладочный
+    python -m effective_features.run_experiment thinned  # сразу основной
+
+Патчи выбираются прореживанием - каждый k-й по порядку, плюс добор патчей
+с редкими классами. Выборка одна и та же при каждом запуске, поэтому
+результат воспроизводится без всяких сидов и серий прогонов.
 """
 
 import sys
-from dataclasses import replace
 
 from effective_features import run, ExperimentConfig
-from effective_features.compare import compare_runs
 
 
 PRESETS = {
-    'fast':     ExperimentConfig(n_patches=10, max_pixels_total=120_000),
-    'research': ExperimentConfig(n_patches=50),
-    'thinned':  ExperimentConfig(use_thinning=True, thinning_target_patches=150),
-    'full':     ExperimentConfig(),   # n_patches=None → весь датасет
+    'fast':    ExperimentConfig(use_thinning=True, thinning_target_patches=10,
+                                max_pixels_total=120_000),
+    'thinned': ExperimentConfig(use_thinning=True, thinning_target_patches=150),
 }
 
 DESCRIPTIONS = {
-    'fast':     'Быстрый - 10 патчей, для отладки (пара минут)',
-    'research': 'Исследовательский - 50 патчей, основной режим',
-    'thinned':  'Прореживание - ~150 патчей систематически, гарантия всех классов',
-    'full':     'Полный - весь датасет, для финального результата (долго)',
+    'fast':    'Отладочный - 10 патчей, проверить что ничего не сломалось',
+    'thinned': 'Основной - ~150 патчей, все классы гарантированно',
 }
 
 
 def _choose_mode():
-    """Меню выбора режима: fast, research, thinned, full."""
-    visible = ['fast', 'research', 'thinned', 'full']   # что показываем в списке
+    """Меню выбора режима."""
+    modes = list(PRESETS)
     print("\n  Выберите режим:\n")
-    for i, m in enumerate(visible, 1):
+    for i, m in enumerate(modes, 1):
         print(f"    {i}. {m:<10s} - {DESCRIPTIONS[m]}")
     print()
     while True:
-        choice = input(f"  Режим (1-{len(visible)} или название): ").strip().lower()
-        if choice in PRESETS:          # принимает и название режима напрямую
+        choice = input(f"  Режим (1-{len(modes)} или название): ").strip().lower()
+        if choice in PRESETS:
             return choice
-        if choice.isdigit() and 1 <= int(choice) <= len(visible):
-            return visible[int(choice) - 1]
-        print(f"  Введите число 1-{len(visible)} или название режима "
-              f"({', '.join(visible)}).")
+        if choice.isdigit() and 1 <= int(choice) <= len(modes):
+            return modes[int(choice) - 1]
+        print(f"  Введите число 1-{len(modes)} или название режима "
+              f"({', '.join(modes)}).")
 
 
-def _choose_seeds():
-    """
-    Запрос seed(ов). Варианты ввода:
-      • одно число        → одиночный запуск (напр.: 42)
-      • несколько чисел   → серия со сравнением (напр.: 1 2 3 4 5)
-      • 'rand' или 'r'    → случайные сиды (спросит, сколько)
-      • Enter             → 42 (по умолчанию)
-
-    Случайные сиды печатаются и сохраняются - эксперимент остаётся
-    воспроизводимым (можно вписать те же числа повторно).
-    """
-    import random as _random
-    print("\n  Введите seed(ы):")
-    print("    • одно число   → одиночный запуск (напр.: 42)")
-    print("    • через пробел → серия со сравнением (напр.: 1 2 3 4 5)")
-    print("    • rand         → случайные сиды (спросит количество)")
-    raw = input("  Seeds (Enter = 42): ").strip().lower()
-
-    if not raw:
-        return [42]
-
-    # Случайные сиды
-    if raw in ('rand', 'r', 'random', 'рандом'):
-        cnt_in = input("  Сколько случайных сидов? (Enter = 5): ").strip()
-        count = int(cnt_in) if cnt_in.isdigit() and int(cnt_in) > 0 else 5
-        seeds = _random.sample(range(1, 10000), count)
-        print(f"\n  Сгенерированы случайные сиды: {seeds}")
-        print(f"  (запиши их, если захочешь повторить этот эксперимент)")
-        return seeds
-
-    seeds = [int(s) for s in raw.split() if s.lstrip('-').isdigit()]
-    return seeds or [42]
-
-
-def _single_run(mode, seed):
-    """Одиночный запуск (результаты в output/ и results/, как обычно)."""
-    cfg = replace(PRESETS[mode], random_seed=seed)
-    print(f"\n  Режим: '{mode}' - {DESCRIPTIONS[mode]}")
-    print(f"  Seed:  {seed}\n")
-    run(cfg)
-
-
-def _batch_run(mode, seeds):
-    """Серия запусков по seed + автоматическое сравнение."""
-    import os
-    import time
-    print("=" * 70)
-    print(f"  СЕРИЯ ЗАПУСКОВ: режим '{mode}', seeds={seeds}")
-    print("=" * 70)
-
-    t_series = time.perf_counter()
-    runs = []
-    per_run_times = {}      # {seed: время запуска в секундах}
-    project_root = None
-    for idx, seed in enumerate(seeds, 1):
-        tag = f"{mode}_seed{seed}"
-        print(f"\n\n{'#' * 70}")
-        print(f"#  ЗАПУСК {idx}/{len(seeds)} - seed={seed}  (папка: results/{tag}/)")
-        print(f"{'#' * 70}")
-        _t = time.perf_counter()
-        cfg = replace(PRESETS[mode], random_seed=seed, run_tag=tag)
-        res = run(cfg)
-        per_run_times[seed] = time.perf_counter() - _t
-        # Берём все критерии, которые отработали в этом прогоне
-        runs.append({
-            'seed': seed,
-            'selected': {m: r.get('names', []) for m, r in res['results'].items()},
-            'evals': {m: r.get('eval') for m, r in res['results'].items()},
-        })
-        if project_root is None:
-            project_root = cfg.project_root
-
-    total_series = time.perf_counter() - t_series
-
-    comparison_dir = os.path.join(project_root, 'results', f'{mode}_comparison')
-    print(f"\n\n{'=' * 70}")
-    print(f"  СРАВНЕНИЕ {len(seeds)} ЗАПУСКОВ → results/{mode}_comparison/")
-    print(f"{'=' * 70}")
-    # Передаём тайминги серии в сравнение - попадут в summary.txt
-    compare_runs(runs, comparison_dir,
-                 series_time=total_series, per_run_times=per_run_times,
-                 mode=mode)
-    print(f"\n  Готово! Результаты: results/{mode}_seed*/  и  results/{mode}_comparison/")
-
-
-def main(mode, seeds):
-    """Маршрутизация: 1 seed → одиночный, 2+ → батч со сравнением."""
-    if len(seeds) == 1:
-        _single_run(mode, seeds[0])
-    else:
-        _batch_run(mode, seeds)
+def main(mode):
+    print(f"\n  Режим: '{mode}' - {DESCRIPTIONS[mode]}\n")
+    run(PRESETS[mode])
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if not args:
-        # Интерактив
-        mode = _choose_mode()
-        if mode in ('full', 'thinned'):
-            # В этих режимах выбор патчей не случайный (весь датасет либо
-            # систематический шаг + добор редких классов), поэтому серия
-            # по нескольким сидам не имеет смысла - одиночный запуск
-            # с дефолтным seed=42.
-            seeds = [42]
-            note = ('используется весь датасет, все 1911' if mode == 'full'
-                    else 'патчи выбираются систематически, не случайно')
-            print(f"\n  Режим '{mode}': сиды не влияют на выбор патчей "
-                  f"({note}), запуск с seed=42.")
-        else:
-            seeds = _choose_seeds()
-    else:
+    if args:
         mode = args[0].strip().lower()
         if mode not in PRESETS:
             print(f"  Неизвестный режим '{mode}'. Доступны: {', '.join(PRESETS)}")
             sys.exit(1)
-        if len(args) >= 2:
-            # Поддержка: research rand [N]  → N случайных сидов
-            if args[1].lower() in ('rand', 'r', 'random'):
-                import random as _random
-                count = int(args[2]) if len(args) >= 3 and args[2].isdigit() else 5
-                seeds = _random.sample(range(1, 10000), count)
-                print(f"  Сгенерированы случайные сиды: {seeds}")
-                print(f"  (запиши их для воспроизводимости)")
-            else:
-                seeds = [int(s) for s in args[1:] if s.lstrip('-').isdigit()]
-                if not seeds:
-                    print("  Seeds должны быть целыми числами или 'rand'.")
-                    sys.exit(1)
-        else:
-            seeds = [42]
+    else:
+        mode = _choose_mode()
 
-    main(mode, seeds)
+    main(mode)

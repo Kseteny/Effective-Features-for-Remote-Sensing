@@ -45,8 +45,9 @@ function tagStyle(id: string) {
 
 const presetNames: Record<string, string> = {
   fast: 'Быстрый',
+  thinned: 'Основной',
+  // старые режимы - встречаются только в прошлых записях истории
   research: 'Исследовательский',
-  thinned: 'Прореживание',
   full: 'Полный',
 }
 
