@@ -12,8 +12,21 @@ onMounted(() => load())
     <header class="site-head">
       <div class="site-head__inner">
         <NuxtLink to="/run" class="brand">
-          <div class="brand__name">Отбор признаков</div>
-          <div class="brand__sub">{{ title }}</div>
+          <svg class="brand__mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <rect x="0" y="0" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.85" />
+            <rect x="6.5" y="0" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.5" />
+            <rect x="13" y="0" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.3" />
+            <rect x="0" y="6.5" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.5" />
+            <rect x="6.5" y="6.5" width="5" height="5" rx="1" fill="var(--gold)" />
+            <rect x="13" y="6.5" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.3" />
+            <rect x="0" y="13" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.3" />
+            <rect x="6.5" y="13" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.5" />
+            <rect x="13" y="13" width="5" height="5" rx="1" fill="var(--forest)" opacity="0.85" />
+          </svg>
+          <div class="brand__text">
+            <div class="brand__name">Отбор признаков</div>
+            <div class="brand__sub">{{ title }}</div>
+          </div>
         </NuxtLink>
 
         <nav class="site-nav">

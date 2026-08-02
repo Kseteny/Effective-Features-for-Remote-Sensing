@@ -44,6 +44,12 @@
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 14px;
+
+  /* Тень и переход - для лёгкой глубины и отклика на интерактив.
+     Тени тёплые (в тон чернил, не серые), чтобы не спорить с палитрой. */
+  --shadow-sm: 0 1px 2px rgba(23, 33, 28, 0.05);
+  --shadow-md: 0 8px 24px -6px rgba(23, 33, 28, 0.14);
+  --ease: 150ms ease;
 }
 
 /* --------------------------------------------------------------------------
@@ -69,7 +75,7 @@ h1, h2, h3 {
   margin: 0;
 }
 
-h1 { font-size: 1.9rem; }
+h1 { font-size: clamp(1.6rem, 1.3rem + 1.1vw, 2.05rem); }
 h2 { font-size: 1.15rem; letter-spacing: -0.01em; }
 h3 { font-size: 1rem; }
 
@@ -102,7 +108,17 @@ a { color: var(--forest); }
   flex-wrap: wrap;
 }
 
-.brand { text-decoration: none; color: inherit; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Метка - патч 3×3, как у Sentinel-2, с одной выделенной ячейкой:
+   ровно то, чем занимается инструмент - выбор нужного среди многих. */
+.brand__mark { flex-shrink: 0; }
 
 .brand__name {
   font-family: var(--font-display);
@@ -138,6 +154,7 @@ a { color: var(--forest); }
   font-size: 0.9rem;
   padding: 0.35rem 0.7rem;
   border-radius: var(--r-md);
+  transition: background var(--ease), color var(--ease);
 }
 
 .site-nav a:hover { background: var(--surface-sunk); color: var(--ink); }
@@ -179,6 +196,7 @@ a { color: var(--forest); }
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .card + .card { margin-top: 1rem; }
@@ -202,6 +220,7 @@ a { color: var(--forest); }
   padding: 0.6rem 0.7rem;
   border-radius: var(--r-md);
   cursor: pointer;
+  transition: background var(--ease);
 }
 
 .choice:hover { background: var(--surface-sunk); }
@@ -228,10 +247,13 @@ a { color: var(--forest); }
   color: #fff;
   cursor: pointer;
   width: 100%;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--ease), box-shadow var(--ease), transform var(--ease);
 }
 
-.btn:hover:not(:disabled) { background: #17563F; }
-.btn:disabled { background: var(--line-strong); cursor: not-allowed; }
+.btn:hover:not(:disabled) { background: #17563F; box-shadow: var(--shadow-md); }
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: var(--shadow-sm); }
+.btn:disabled { background: var(--line-strong); cursor: not-allowed; box-shadow: none; }
 
 /* Второстепенное действие: отмена не должна выглядеть так же
    заметно, как запуск, но и прятать её нельзя. */
@@ -275,6 +297,7 @@ a { color: var(--forest); }
 }
 
 .table tr:last-child td { border-bottom: 0; }
+.table tbody tr { transition: background var(--ease); }
 .table tbody tr:hover { background: var(--surface-sunk); }
 
 .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -375,6 +398,7 @@ a { color: var(--forest); }
   line-height: 1;
   padding: 0.25rem 0.45rem;
   border-radius: var(--r-sm);
+  transition: color var(--ease), background var(--ease);
 }
 
 .icon-btn:hover { color: var(--danger); background: var(--danger-tint); }
