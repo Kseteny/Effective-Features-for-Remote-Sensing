@@ -4,13 +4,13 @@ useHead({ title: 'О проекте' })
 
 <template>
   <article class="page page--narrow prose">
-    <div class="page__head">
-      <h1>О проекте</h1>
-      <p class="page__lead">
+    <PageHeader>
+      О проекте
+      <template #lead>
         Инструмент сравнивает методы отбора признаков в задачах
         дистанционного зондирования Земли.
-      </p>
-    </div>
+      </template>
+    </PageHeader>
 
     <p>
       По мультиспектральному снимку вычисляется набор признаков, затем разные

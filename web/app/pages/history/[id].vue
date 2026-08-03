@@ -38,9 +38,9 @@ function tagStyle(c: { color?: string }) {
   <div class="page">
     <NuxtLink to="/history" class="back">← История</NuxtLink>
 
-    <div class="page__head">
-      <h1>Расчёт <span class="num id">{{ taskId }}</span></h1>
-    </div>
+    <PageHeader>
+      Расчёт <span class="num id">{{ taskId }}</span>
+    </PageHeader>
 
     <p v-if="error" class="notice notice--error">
       Такого расчёта нет - возможно, его удалили из истории.

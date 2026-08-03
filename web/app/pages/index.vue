@@ -28,13 +28,13 @@ const groups = computed(() => {
 
 <template>
   <div class="page">
-    <div class="page__head">
-      <h1>Признаки</h1>
-      <p class="page__lead">
+    <PageHeader>
+      Признаки
+      <template #lead>
         Всё, что программа вычисляет по снимку. Номер слева - тот же,
         что используется в выводе программы.
-      </p>
-    </div>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="notice notice--error">
       Сервер расчётов не отвечает. Проверьте, запущен ли он на порту 8000.

@@ -67,13 +67,13 @@ async function remove(taskId: string) {
 
 <template>
   <div class="page">
-    <div class="page__head">
-      <h1>История</h1>
-      <p class="page__lead">
+    <PageHeader>
+      История
+      <template #lead>
         Все законченные расчёты. Сохраняются в базе, поэтому остаются
         на месте после перезапуска сервера.
-      </p>
-    </div>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="notice notice--error">
       Сервер расчётов не отвечает. Проверьте, запущен ли он на порту 8000.

@@ -53,13 +53,13 @@ function tagStyle(c: { color?: string }) {
 
 <template>
   <div class="page">
-    <div class="page__head">
-      <h1>Расчёт</h1>
-      <p class="page__lead">
+    <PageHeader>
+      Расчёт
+      <template #lead>
         Выберите объём выборки и критерии - программа отберёт признаки
         каждым из них и покажет, где результаты сошлись.
-      </p>
-    </div>
+      </template>
+    </PageHeader>
 
     <div class="run">
       <!-- Панель настроек -->

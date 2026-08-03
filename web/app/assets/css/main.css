@@ -45,6 +45,15 @@
   --r-md: 8px;
   --r-lg: 14px;
 
+  /* Отступы - 8-точечная сетка, чтобы значения не подбирались на глаз.
+     rem привязан к 16px (шрифт html не переопределён), поэтому
+     0.5rem = 8px и дальше кратно. */
+  --space-1: 0.5rem;   /*  8px */
+  --space-2: 1rem;     /* 16px */
+  --space-3: 1.5rem;   /* 24px */
+  --space-4: 2rem;     /* 32px */
+  --space-6: 3rem;     /* 48px */
+
   /* Тень и переход - для лёгкой глубины и отклика на интерактив.
      Тени тёплые (в тон чернил, не серые), чтобы не спорить с палитрой. */
   --shadow-sm: 0 1px 2px rgba(23, 33, 28, 0.05);
@@ -168,21 +177,51 @@ a { color: var(--forest); }
 .site-nav__gap { flex: 1; min-width: 1rem; }
 
 /* --------------------------------------------------------------------------
+   ФОНОВАЯ ДЕКОРАЦИЯ
+   Изолинии, как на топографической карте - идея была в палитре с самого
+   начала («бумага - оттенок топографической карты»), здесь она наконец
+   проявляется визуально. Живёт в пустых полях по краям широкого экрана
+   и гаснет к центру через маску в самом SVG, поэтому текста не касается.
+   Скрыта на экранах уже, чем сама декорация - там и так нет пустых полей.
+   -------------------------------------------------------------------------- */
+.bg-deco {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 360px;
+  pointer-events: none;
+  z-index: -1;
+}
+.bg-deco svg { display: block; width: 100%; height: 100%; }
+.bg-deco--left  { left: 0; }
+.bg-deco--right { right: 0; transform: scaleX(-1); }
+
+.bg-deco__lines {
+  fill: none;
+  stroke: var(--forest);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+@media (max-width: 1400px) { .bg-deco { display: none; } }
+
+/* --------------------------------------------------------------------------
    РАЗМЕТКА СТРАНИЦ
    -------------------------------------------------------------------------- */
 .page {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: var(--space-4) var(--space-3) var(--space-6);
 }
 
 .page--narrow { max-width: 760px; }
 
-.page__head { margin-bottom: 1.75rem; }
+.page__head { margin-bottom: var(--space-4); }
 
 .page__lead {
   color: var(--ink-soft);
-  margin: 0.5rem 0 0;
+  margin: var(--space-1) 0 0;
   /* Ширина не ограничена: подпись под заголовком короткая и должна
      идти одной строкой. Если текст всё же длинный - перенесётся сам,
      на узких экранах так и будет. */
@@ -195,11 +234,11 @@ a { color: var(--forest); }
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  padding: 1.25rem;
+  padding: var(--space-3);
   box-shadow: var(--shadow-sm);
 }
 
-.card + .card { margin-top: 1rem; }
+.card + .card { margin-top: var(--space-2); }
 
 .card__title {
   font-family: var(--font-mono);
@@ -371,21 +410,28 @@ a { color: var(--forest); }
    ТЕКСТ ДОКУМЕНТАЦИИ
    -------------------------------------------------------------------------- */
 .prose p { margin: 0 0 1rem; max-width: 68ch; }
-.prose h2 { margin: 2.25rem 0 0.75rem; }
+.prose h2 { margin: var(--space-4) 0 0.75rem; }
 .prose ul { max-width: 68ch; padding-left: 1.2rem; }
 .prose li { margin: 0.45rem 0; }
 
 .prose__note {
-  border-left: 2px solid var(--forest);
+  border-left: 2px solid var(--line-strong);
   padding-left: 1rem;
   color: var(--ink-soft);
   font-size: 0.92rem;
 }
 
+/* Врезка окрашивается в цвет критерия, если относится к конкретному -
+   тот же цвет, что и везде в интерфейсе (сетка признаков, графики, теги). */
+.prose__note--forest { border-left-color: var(--forest); }
+.prose__note--plum   { border-left-color: var(--plum); }
+.prose__note--water  { border-left-color: var(--water); }
+.prose__note--gold   { border-left-color: var(--gold); }
+
 /* --------------------------------------------------------------------------
    МЕЛОЧИ
    -------------------------------------------------------------------------- */
-.stack > * + * { margin-top: 1rem; }
+.stack > * + * { margin-top: var(--space-2); }
 .muted { color: var(--ink-soft); }
 .mono-sm { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-faint); }
 
@@ -412,7 +458,7 @@ a { color: var(--forest); }
    -------------------------------------------------------------------------- */
 .site-foot {
   border-top: 1px solid var(--line);
-  margin-top: 3rem;
+  margin-top: var(--space-6);
   background: var(--surface);
 }
 

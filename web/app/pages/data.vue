@@ -33,17 +33,29 @@ function roleOf(band: string): string | null {
 function usedInFeatures(band: string): boolean {
   return info.value?.feature_bands.includes(band) ?? false
 }
+
+/** Четыре сводных числа над описанием датасета - раньше были скопированы
+ *  как четыре одинаковых по структуре блока, теперь один список. */
+const stats = computed(() => {
+  if (!info.value) return []
+  return [
+    { value: info.value.n_pairs ?? '-', label: 'пар снимок-маска' },
+    { value: info.value.n_bands, label: 'каналов в файле' },
+    { value: info.value.n_classes, label: 'классов' },
+    { value: info.value.n_features, label: 'признаков будет' },
+  ]
+})
 </script>
 
 <template>
   <div class="page">
-    <div class="page__head">
-      <h1>Данные</h1>
-      <p class="page__lead">
+    <PageHeader>
+      Данные
+      <template #lead>
         Что подключено сейчас и что на этом получится посчитать.
         Описание берётся из файла <code>dataset.json</code> в корне проекта.
-      </p>
-    </div>
+      </template>
+    </PageHeader>
 
     <p v-if="loading && !report" class="notice notice--empty">Читаю описание…</p>
 
@@ -60,21 +72,9 @@ function usedInFeatures(band: string): boolean {
       <div class="card">
         <p class="card__title">{{ info.name }}</p>
         <div class="stats">
-          <div class="stats__item">
-            <div class="stats__num num">{{ info.n_pairs ?? '-' }}</div>
-            <div class="stats__label">пар снимок-маска</div>
-          </div>
-          <div class="stats__item">
-            <div class="stats__num num">{{ info.n_bands }}</div>
-            <div class="stats__label">каналов в файле</div>
-          </div>
-          <div class="stats__item">
-            <div class="stats__num num">{{ info.n_classes }}</div>
-            <div class="stats__label">классов</div>
-          </div>
-          <div class="stats__item">
-            <div class="stats__num num">{{ info.n_features }}</div>
-            <div class="stats__label">признаков будет</div>
+          <div class="stats__item" v-for="s in stats" :key="s.label">
+            <div class="stats__num num">{{ s.value }}</div>
+            <div class="stats__label">{{ s.label }}</div>
           </div>
         </div>
       </div>
